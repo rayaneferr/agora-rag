@@ -13,7 +13,6 @@ import threading
 import webbrowser
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import asdict
-from datetime import date
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -33,20 +32,6 @@ WEB_DIST = vs.ROOT / "web" / "dist"
 # L'application n'écoute que sur la boucle locale ; on refuse aussi les requêtes dont l'en-tête Host
 # ne la désigne pas (DNS rebinding : un site tiers ne doit pas pouvoir piloter l'agent).
 ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
-MOIS = [
-    "janvier",
-    "février",
-    "mars",
-    "avril",
-    "mai",
-    "juin",
-    "juillet",
-    "août",
-    "septembre",
-    "octobre",
-    "novembre",
-    "décembre",
-]
 
 
 class Download:
@@ -144,17 +129,6 @@ def _points(collection: str) -> int | None:
         return None  # table en cours de téléchargement
 
 
-def _fr(value) -> str:
-    """Une borne lisible : « 18 juillet 2024 » pour une date ISO, la valeur brute sinon."""
-    if isinstance(value, str) and len(value) == 10 and value[4] == "-":
-        try:
-            d = date.fromisoformat(value)
-            return f"{d.day} {MOIS[d.month - 1]} {d.year}"
-        except ValueError:
-            return value
-    return str(value)
-
-
 def coverage(spec: ContextSpec) -> str | None:
     """Étendue des archives d'un contexte (« séances du 18 juillet 2024 au 26 septembre 2026 »), mise en cache."""
     if spec.id in state.coverage or not spec.coverage_column:
@@ -163,10 +137,10 @@ def coverage(spec: ContextSpec) -> str | None:
         b = vs.bounds(spec.collections[0], spec.coverage_column)
     except Exception:
         return None
-    if b is None:
-        return None
-    state.coverage[spec.id] = spec.coverage_label.format(min=_fr(b[0]), max=_fr(b[1]))
-    return state.coverage[spec.id]
+    text = spec.coverage_text(b)
+    if text is not None:
+        state.coverage[spec.id] = text
+    return text
 
 
 @app.get("/api/health")

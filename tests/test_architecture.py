@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 
 SRC = Path(__file__).parents[1] / "src" / "agora"
-STDLIB_OK = {"json", "re", "time", "collections", "dataclasses", "typing", "abc", "enum"}
+STDLIB_OK = {"json", "re", "time", "datetime", "collections", "dataclasses", "typing", "abc", "enum"}
 
 
 def imports(path: Path) -> set[str]:
