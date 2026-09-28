@@ -1,5 +1,7 @@
 # agora-rag
 
+[![CI](https://github.com/rayaneferr/agora-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/rayaneferr/agora-rag/actions/workflows/ci.yml)
+
 Agent conversationnel dont le RAG est exposé via **MCP** : le LLM décide lui-même quand
 chercher, quoi chercher et avec quels filtres, en appelant des outils de deux serveurs MCP.
 
@@ -22,9 +24,12 @@ cp .env.example .env
 # Qdrant
 docker compose up -d        # ou : docker run -d --name agora-qdrant -p 6333:6333 -v "$PWD/qdrant_storage:/qdrant/storage" qdrant/qdrant
 
-# Ingestion (télécharge les données dans data/)
+# Index : soit on restaure des snapshots (data/snapshots/*.snapshot)...
+uv run agora-index import
+# ... soit on reconstruit tout (~2 h sur un M4 Pro, télécharge les données dans data/)
 uv run python -m agora.ingestion.cinema          # --limit 500 pour tester vite
 uv run python -m agora.ingestion.assemblee       # --limit-seances 20 pour tester vite
+uv run agora-index export                        # pour partager l'index
 
 # Chat
 uv run agora-chat --model anthropic/claude-sonnet-5
@@ -35,9 +40,19 @@ La clé API est lue dans cet ordre : `--api-key`, `LLM_API_KEY`, la variable sta
 
 Chaque réponse affiche latence, tokens, coût et nombre d'appels d'outils.
 
-## Utiliser les serveurs depuis un autre client MCP
+## Serveurs MCP : stdio ou HTTP
 
-Les serveurs sont indépendants du client (stdio). Exemple pour Claude Code :
+Par défaut, `agora-chat` lance les serveurs en sous-processus (stdio). Ils peuvent aussi tourner
+comme services HTTP autonomes (streamable-http, sans état) :
+
+```bash
+uv run mcp-cinema --transport http       # http://127.0.0.1:8101/mcp
+uv run mcp-assemblee --transport http    # http://127.0.0.1:8102/mcp
+uv run agora-chat --model openai/gpt-5.4-mini \
+  --mcp-url http://127.0.0.1:8101/mcp --mcp-url http://127.0.0.1:8102/mcp
+```
+
+Ils sont indépendants du client et se branchent sur n'importe quel client MCP, par exemple Claude Code :
 
 ```bash
 claude mcp add cinema -- uv --directory /chemin/vers/agora-rag run mcp-cinema
@@ -54,6 +69,16 @@ claude mcp add assemblee -- uv --directory /chemin/vers/agora-rag run mcp-assemb
 Les données ne sont pas versionnées : elles sont téléchargées par les scripts d'ingestion.
 Synopsis issus de Wikipédia (CC BY-SA) ; comptes rendus de l'Assemblée nationale sous
 [Licence Ouverte](https://data.assemblee-nationale.fr/licence-ouverte-open-licence).
+
+## Développement
+
+```bash
+uv run pytest            # parseur, chunking, outils MCP testés via le protocole
+uv run ruff check . && uv run ruff format --check .
+```
+
+Les tests n'ont besoin ni de Docker ni de bge-m3 : les outils sont appelés à travers un client MCP
+en mémoire, avec Qdrant en mode `:memory:` et un embedder factice.
 
 ## Feuille de route
 
