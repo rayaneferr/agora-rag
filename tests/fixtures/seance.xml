@@ -1,0 +1,58 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!-- Séance fictive, même structure que les comptes rendus Syceron réels. -->
+<compteRendu xmlns="http://schemas.assemblee-nationale.fr/referentiel">
+  <uid>CRSANR5L17S2025O1N999</uid>
+  <metadonnees>
+    <dateSeance>20241106140000000</dateSeance>
+  </metadonnees>
+  <contenu>
+    <ouvertureSeance nivpoint="1" ordre_absolu_seance="1">
+      <orateurs/>
+      <texte>Présidence de Mme la présidente</texte>
+      <paragraphe ordre_absolu_seance="2" id_acteur="PA000001" roledebat="president">
+        <orateurs><orateur><nom>Mme la présidente</nom><id>1</id><qualite/></orateur></orateurs>
+        <texte>La séance est ouverte.</texte>
+      </paragraphe>
+    </ouvertureSeance>
+    <point nivpoint="1" ordre_absolu_seance="5">
+      <orateurs/>
+      <texte>Questions au Gouvernement</texte>
+    </point>
+    <point nivpoint="2" ordre_absolu_seance="7">
+      <orateurs/>
+      <texte>Régulation des réseaux sociaux</texte>
+      <paragraphe ordre_absolu_seance="8" id_acteur="PA000001" roledebat="president">
+        <orateurs><orateur><nom>Mme la présidente</nom><id>1</id><qualite/></orateur></orateurs>
+        <texte>La parole est à Mme Alice Martin.</texte>
+      </paragraphe>
+      <paragraphe ordre_absolu_seance="9" id_acteur="PA000002">
+        <orateurs><orateur><nom>Mme Alice Martin</nom><id>2</id><qualite/></orateur></orateurs>
+        <texte>Madame la ministre, les réseaux sociaux exposent nos enfants à des contenus violents dès leur plus jeune âge.<br/>Quelles mesures comptez-vous prendre pour protéger les mineurs ?</texte>
+      </paragraphe>
+      <paragraphe ordre_absolu_seance="10">
+        <orateurs/>
+        <texte><italique>(Applaudissements sur plusieurs bancs.)</italique></texte>
+      </paragraphe>
+      <paragraphe ordre_absolu_seance="11" id_acteur="PA000003">
+        <orateurs><orateur><nom>Mme Claire Dubois</nom><id>3</id><qualite>ministre du numérique</qualite></orateur></orateurs>
+        <texte>Vous avez raison, la protection des mineurs en ligne est une priorité absolue du Gouvernement et nous y travaillons.</texte>
+      </paragraphe>
+      <paragraphe ordre_absolu_seance="12" id_acteur="PA000004">
+        <orateurs><orateur><nom>M. Bruno Petit</nom><id>4</id><qualite/></orateur></orateurs>
+        <texte>Très bien !</texte>
+      </paragraphe>
+      <paragraphe ordre_absolu_seance="13" id_acteur="PA000003">
+        <orateurs><orateur><nom>Mme Claire Dubois</nom><id>3</id><qualite>ministre du numérique</qualite></orateur></orateurs>
+        <texte>Nous présenterons un texte imposant la vérification de l’âge sur les plateformes avant la fin de l’année.</texte>
+      </paragraphe>
+    </point>
+    <point nivpoint="2" ordre_absolu_seance="20">
+      <orateurs/>
+      <texte>Suppression de postes d’enseignants</texte>
+      <paragraphe ordre_absolu_seance="21" id_acteur="PA000004">
+        <orateurs><orateur><nom>M. Bruno Petit</nom><id>4</id><qualite/></orateur></orateurs>
+        <texte>Monsieur le ministre, la suppression de quatre mille postes d’enseignants va dégrader les conditions d’apprentissage de nos élèves dans les zones rurales.</texte>
+      </paragraphe>
+    </point>
+  </contenu>
+</compteRendu>
