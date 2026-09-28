@@ -1,6 +1,6 @@
 [project]
 name = "agora-rag"
-version = "0.6.0"
+version = "0.7.0"
 description = "Serveurs MCP de RAG sémantique (bge-m3 + LanceDB) pour Claude : débats de l'Assemblée nationale, synopsis de films"
 authors = [
     { name = "Rayane Ferrat", email = "rayane3001@icloud.com" }
