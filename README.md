@@ -24,12 +24,12 @@ cp .env.example .env
 # Qdrant
 docker compose up -d        # ou : docker run -d --name agora-qdrant -p 6333:6333 -v "$PWD/qdrant_storage:/qdrant/storage" qdrant/qdrant
 
-# Index : soit on restaure des snapshots (data/snapshots/*.snapshot)...
+# Index : téléchargé depuis Hugging Face et restauré (quelques minutes)...
 uv run agora-index import
-# ... soit on reconstruit tout (~2 h sur un M4 Pro, télécharge les données dans data/)
+# ... ou reconstruit de zéro (~2 h sur un M4 Pro, télécharge les données brutes dans data/)
 uv run python -m agora.ingestion.cinema          # --limit 500 pour tester vite
 uv run python -m agora.ingestion.assemblee       # --limit-seances 20 pour tester vite
-uv run agora-index export                        # pour partager l'index
+uv run agora-index export && uv run agora-index publish   # republier l'index
 
 # Chat
 uv run agora-chat --model anthropic/claude-sonnet-5
@@ -66,7 +66,9 @@ claude mcp add assemblee -- uv --directory /chemin/vers/agora-rag run mcp-assemb
 | Films | [Wikipedia Movie Plots](https://huggingface.co/datasets/vishnupriyavr/wiki-movie-plots-with-summaries) | chunk de synopsis (~1500 car.), préfixé titre/année/genre/réalisateur |
 | Débats | [data.assemblee-nationale.fr](https://data.assemblee-nationale.fr/travaux-parlementaires/debats) (XML Syceron) | une intervention (paragraphes consécutifs d'un même orateur sous un même point), préfixée orateur/date/sujet |
 
-Les données ne sont pas versionnées : elles sont téléchargées par les scripts d'ingestion.
+L'index prêt à l'emploi (snapshots Qdrant + manifeste) est publié sur Hugging Face :
+[rferrat/agora-rag-index](https://huggingface.co/datasets/rferrat/agora-rag-index).
+Les données brutes ne sont pas versionnées : elles sont téléchargées par les scripts d'ingestion.
 Synopsis issus de Wikipédia (CC BY-SA) ; comptes rendus de l'Assemblée nationale sous
 [Licence Ouverte](https://data.assemblee-nationale.fr/licence-ouverte-open-licence).
 
