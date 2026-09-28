@@ -6,13 +6,17 @@ Agent conversationnel dont le RAG est exposé via **MCP** : le LLM décide lui-m
 chercher, quoi chercher et avec quels filtres, en appelant des outils de deux serveurs MCP.
 
 ```
-                         ┌─> serveur MCP "cinema"    ─> Qdrant "films"   (Wikipedia Movie Plots, ~35k films)
-Utilisateur ─> client ───┤     search_films, get_film
-               (LiteLLM) └─> serveur MCP "assemblee" ─> Qdrant "debats"  (comptes rendus AN, 17e législature)
-                               find_orateurs, search_debats, get_contexte
+Navigateur (React) ──SSE──> API locale (FastAPI) ──LiteLLM──> OpenAI (clé de l'utilisateur)
+                                 │ client MCP
+                                 ├─> serveur MCP "cinema"    ─> Qdrant "films"   (Wikipedia Movie Plots, ~35k films)
+                                 │     search_films, get_film
+                                 └─> serveur MCP "assemblee" ─> Qdrant "debats"  (comptes rendus AN, 17e législature)
+                                       find_orateurs, search_debats, get_contexte
 ```
 
-- **LLM au choix** : le client passe par LiteLLM, l'utilisateur fournit juste `--model` et sa clé.
+- **100 % local** : l'app tourne sur la machine de l'utilisateur ; sa clé API ne part que chez son fournisseur.
+- **Interface** : chat en streaming, appels d'outils MCP affichés en direct, sources cliquables,
+  latence / tokens / coût par réponse, journal technique, 4 ambiances de couleurs.
 - **Embeddings locaux** : `BAAI/bge-m3` (multilingue, 1024 dim), sur MPS si dispo.
 
 ## Démarrage
@@ -31,25 +35,34 @@ uv run python -m agora.ingestion.cinema          # --limit 500 pour tester vite
 uv run python -m agora.ingestion.assemblee       # --limit-seances 20 pour tester vite
 uv run agora-index export && uv run agora-index publish   # republier l'index
 
-# Chat
-uv run agora-chat --model anthropic/claude-sonnet-5
+# Interface
+(cd web && npm install && npm run build)
+uv run agora                                     # ouvre http://127.0.0.1:8765
 ```
 
-La clé API est lue dans cet ordre : `--api-key`, `LLM_API_KEY`, la variable standard du provider
-(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`…), sinon elle est demandée au lancement.
+Au premier lancement, l'interface demande le fournisseur et la **clé API** (OpenAI pour l'instant ;
+une clé de [platform.openai.com](https://platform.openai.com/api-keys), distincte d'un abonnement ChatGPT),
+puis le modèle. La clé reste dans l'onglet du navigateur (ou sur l'appareil si « se souvenir » est coché)
+et n'est jamais stockée ni journalisée côté serveur.
 
-Chaque réponse affiche latence, tokens, coût et nombre d'appels d'outils.
+**Mode démo** : `AGORA_DEMO=1 uv run agora` ajoute un fournisseur « Mode démo » sans clé — un faux LLM qui
+appelle vraiment les outils MCP, pour tester l'interface sans rien dépenser.
+
+**Développement du front** : `uv run agora --dev` (API seule) + `cd web && npm run dev` (Vite, rechargement à chaud).
+
+**En ligne de commande** : `uv run agora-chat --model openai/gpt-5.4-mini` (clé via `--api-key`,
+`OPENAI_API_KEY` ou saisie).
 
 ## Serveurs MCP : stdio ou HTTP
 
-Par défaut, `agora-chat` lance les serveurs en sous-processus (stdio). Ils peuvent aussi tourner
+Par défaut, l'app et `agora-chat` lancent les serveurs en sous-processus (stdio). Ils peuvent aussi tourner
 comme services HTTP autonomes (streamable-http, sans état) :
 
 ```bash
 uv run mcp-cinema --transport http       # http://127.0.0.1:8101/mcp
 uv run mcp-assemblee --transport http    # http://127.0.0.1:8102/mcp
 uv run agora-chat --model openai/gpt-5.4-mini \
-  --mcp-url http://127.0.0.1:8101/mcp --mcp-url http://127.0.0.1:8102/mcp
+  --mcp-url cinema=http://127.0.0.1:8101/mcp --mcp-url assemblee=http://127.0.0.1:8102/mcp
 ```
 
 Ils sont indépendants du client et se branchent sur n'importe quel client MCP, par exemple Claude Code :
@@ -86,8 +99,8 @@ en mémoire, avec Qdrant en mode `:memory:` et un embedder factice.
 
 - [x] **v0.1.0** — CLI + 2 serveurs MCP (RAG cinéma et Assemblée nationale)
 - [ ] **v0.2.0** — tests, lint, CI, serveurs MCP en HTTP, ingestion complète + export d'index
-- [ ] **v0.3.0** — backend FastAPI (validation de clé, liste des modèles, chat en streaming)
-- [ ] **v0.4.0** — front React : saisie de la clé (OpenAI / Gemini / Anthropic), chat, sources, stats
+- [ ] **v0.3.0** — interface locale : backend FastAPI (SSE) + front React, OpenAI ; sources, stats, journal
+- [ ] **v0.4.0** — autres fournisseurs (Anthropic, Gemini), mascotte, historique des conversations
 - [ ] **v0.5.0** — installation locale en une commande : Qdrant + restauration automatique du snapshot + bge-m3 + app
 - [ ] **v0.6.0** — groupes politiques, historique, choix des corpus, mise à jour incrémentale des séances
 - [ ] **v0.7.0** — benchmark : qualité du retrieval, exactitude des citations, latence/coût par modèle
