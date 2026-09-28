@@ -1,7 +1,7 @@
 [project]
 name = "agora-rag"
-version = "0.5.1"
-description = "Agents conversationnels locaux, un par contexte (base indexée + serveur MCP) : cinéma, Assemblée nationale"
+version = "0.6.0"
+description = "Serveurs MCP de RAG sémantique (bge-m3 + LanceDB) pour Claude : débats de l'Assemblée nationale, synopsis de films ; application locale optionnelle"
 authors = [
     { name = "Rayane", email = "rferrat@luccasoftware.com" }
 ]
