@@ -55,6 +55,8 @@ et les règles de sourçage. Dans Claude Code, ils apparaissent comme des comman
 `/mcp__agora-assemblee__position-orateur`, `/mcp__agora-cinema__trouver-un-film`… Les **resources**
 `assemblee://archives` et `cinema://archives` décrivent l'étendue réelle de chaque base.
 
+![Claude Code : le prompt fiche-film appelle search_films puis get_film, et présente le film sans en divulgâcher la fin](docs/screenshot-claude-code.png)
+
 <details>
 <summary>Claude Desktop</summary>
 
