@@ -25,6 +25,8 @@ ZIP_PATH = vs.DATA_DIR / "an17_syceron.xml.zip"
 NS = {"an": "http://schemas.assemblee-nationale.fr/referentiel"}
 MIN_CHARS = 120  # sous ce seuil : « La parole est à… », « Très bien ! », etc.
 BATCH = 128
+# Le XML vient d'Internet : pas d'entités externes ni d'accès réseau pendant le parsing (XXE).
+XML_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=True)
 
 
 # Titres de points qui ne disent rien du sujet. Les débats qui suivent une suspension sont rangés
@@ -54,7 +56,7 @@ def split_orateur(raw: str) -> tuple[str, str | None, str | None]:
 
 
 def parse_seance(xml_bytes: bytes) -> Iterator[dict]:
-    root = etree.fromstring(xml_bytes)
+    root = etree.fromstring(xml_bytes, XML_PARSER)
     uid = root.findtext("an:uid", namespaces=NS)
     raw_date = root.findtext("an:metadonnees/an:dateSeance", namespaces=NS)  # 20241106140000000
     d = date(int(raw_date[:4]), int(raw_date[4:6]), int(raw_date[6:8]))
@@ -175,15 +177,7 @@ def point_id(p: dict) -> str:
 
 def index(items: list[tuple[str, dict]], embed_fn=None) -> None:
     vectors = (embed_fn or vs.embed)([text for text, _ in items])
-    rows = [
-        # Id déterministe : relancer l'ingestion met à jour au lieu de dupliquer.
-        {
-            **p,
-            "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{p['seance_uid']}/{p['ordre']}/{p['chunk_index']}")),
-            "vector": v,
-        }
-        for v, (_, p) in zip(vectors, items, strict=True)
-    ]
+    rows = [{**p, "id": point_id(p), "vector": v} for v, (_, p) in zip(vectors, items, strict=True)]
     vs.upsert(COLLECTION, rows)
 
 

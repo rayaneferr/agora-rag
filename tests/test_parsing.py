@@ -98,3 +98,13 @@ def test_chunk_text_paragraphe_geant_avec_recouvrement():
 def test_join_chunks_inverse_chunk_text():
     text = "Intro.\n" + "b" * 3000 + "\nConclusion."
     assert join_chunks(chunk_text(text, max_chars=1000)) == text
+
+
+def test_entites_externes_ignorees():
+    # XXE : une entité externe référencée dans le texte ne doit ni être résolue ni casser le parseur.
+    prolog, rest = SEANCE.split(b"?>", 1)
+    hostile = prolog + b'?><!DOCTYPE compteRendu [<!ENTITY xxe SYSTEM "file:///etc/hosts">]>' + rest
+    hostile = hostile.replace(b"</texte>", b"&xxe;</texte>", 1)
+    interventions_ = list(parse_seance(hostile))
+    assert len(interventions_) == 5
+    assert "localhost" not in " ".join(i["text"] for i in interventions_)

@@ -1,7 +1,7 @@
 """Adaptateur sortant « recherche vectorielle » : modèle d'embeddings (bge-m3) et base LanceDB embarquée.
 
-LanceDB est une bibliothèque, pas un serveur : l'index est un dossier (`data/lancedb/`), ouvert directement par
-le processus. Ni Docker, ni VM, ni service à lancer.
+LanceDB est une bibliothèque, pas un serveur : l'index est un dossier (`data/lancedb/` par défaut, ou
+`$AGORA_HOME/lancedb`), ouvert directement par le processus. Ni Docker, ni VM, ni service à lancer.
 """
 
 import os
@@ -10,15 +10,19 @@ from functools import lru_cache
 from pathlib import Path
 
 import pyarrow as pa
+import pyarrow.compute as pc
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parents[4]  # racine du dépôt
-DATA_DIR = ROOT / "data"
+ROOT = Path(__file__).resolve().parents[4]  # racine du dépôt (web/dist, .env)
 
 load_dotenv(ROOT / ".env")
 
+# Où vivent les données (index, fichiers sources téléchargés) : par défaut à côté du code.
+DATA_DIR = Path(os.getenv("AGORA_HOME", ROOT / "data")).expanduser()
 DB_DIR = DATA_DIR / "lancedb"  # une table = un dossier <nom>.lance
 EMBED_MODEL = os.getenv("EMBED_MODEL", "BAAI/bge-m3")
+# Révision (commit) du modèle : les poids PyTorch sont du pickle, on ne charge que ceux qu'on a validés.
+EMBED_REVISION = os.getenv("EMBED_REVISION", "5617a9f61b028005a4858fdac845db406aefb181")
 
 _embedder_lock = threading.Lock()
 
@@ -31,10 +35,11 @@ def _load_embedder():
     from sentence_transformers import SentenceTransformer
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
+    kwargs = {"device": device, "revision": EMBED_REVISION}
     try:  # modèle déjà en cache : aucun appel au Hub
-        model = SentenceTransformer(EMBED_MODEL, device=device, local_files_only=True)
-    except OSError:  # premier lancement : téléchargement (~2 Go), une seule fois
-        model = SentenceTransformer(EMBED_MODEL, device=device)
+        model = SentenceTransformer(EMBED_MODEL, local_files_only=True, **kwargs)
+    except OSError:  # premier lancement : téléchargement (~2,3 Go), une seule fois
+        model = SentenceTransformer(EMBED_MODEL, **kwargs)
     if device == "mps":
         model.half()
     return model
@@ -120,3 +125,16 @@ def select(name: str, where: str | None = None, columns: list[str] | None = None
 
 def count(name: str) -> int:
     return db().open_table(name).count_rows() if has_table(name) else 0
+
+
+def bounds(name: str, column: str) -> tuple | None:
+    """(min, max) d'une colonne, en ne lisant que cette colonne. None si la table est absente ou vide."""
+    if not has_table(name):
+        return None
+    table = db().open_table(name)
+    n = table.count_rows()
+    if n == 0:
+        return None
+    col = table.search().select([column]).limit(n).to_arrow().column(column)
+    mm = pc.min_max(col).as_py()
+    return mm["min"], mm["max"]

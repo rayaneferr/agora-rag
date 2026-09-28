@@ -37,8 +37,13 @@ d'embeddings.
 ```bash
 git clone https://github.com/rayaneferr/agora-rag && cd agora-rag
 uv sync
-uv run agora-index import      # télécharge les tables dans data/lancedb/
+uv run agora-index import      # télécharge les tables dans data/lancedb/ et vérifie leurs empreintes
 ```
+
+L'application épingle un commit précis de ce dataset et compare chaque fichier téléchargé aux empreintes
+publiées par le Hub pour ce commit (sha256 des fichiers LFS). Une nouvelle publication n'est utilisée qu'après
+mise à jour de la révision dans le code d'agora-rag. Le `manifest.json` contient aussi le sha256 de chaque
+fichier de table.
 
 ## Détails techniques
 
