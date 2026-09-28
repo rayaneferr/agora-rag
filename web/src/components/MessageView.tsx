@@ -115,7 +115,7 @@ function StatsLine({ msg }: { msg: AssistantMessage }) {
       <span>
         {(s.prompt_tokens + s.completion_tokens).toLocaleString("fr-FR")} tokens
       </span>
-      <span>{formatCost(s.cost_usd)}</span>
+      <span>{s.cost_usd ? formatCost(s.cost_usd) : "gratuit"}</span>
     </div>
   );
 }

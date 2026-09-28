@@ -7,6 +7,7 @@ export interface Provider {
   key_hint: string;
   available: boolean;
   note: string;
+  needs_key: boolean;
 }
 
 export interface Model {

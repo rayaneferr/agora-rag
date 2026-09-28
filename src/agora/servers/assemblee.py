@@ -81,8 +81,8 @@ def search_debats(
     Args:
         query: sujet ou question en langage naturel (ex. « réforme des retraites, âge légal »).
         orateur: nom EXACT de l'orateur, obtenu via find_orateurs (ex. « Éric Coquerel », sans civilité).
-        date_min: date minimale incluse, format AAAA-MM-JJ.
-        date_max: date maximale incluse, format AAAA-MM-JJ.
+        date_min: date minimale incluse, format AAAA-MM-JJ. Seulement si l'utilisateur précise une période.
+        date_max: date maximale incluse, format AAAA-MM-JJ. Seulement si l'utilisateur précise une période.
         limit: nombre d'extraits à retourner (1-20).
     """
     must: list[models.Condition] = []

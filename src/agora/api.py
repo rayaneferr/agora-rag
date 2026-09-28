@@ -127,13 +127,14 @@ def _sse(event: dict) -> str:
 async def chat(body: ChatRequest):
     if body.provider == "demo" and providers.demo_enabled():
         llm = demo_stream
-    elif body.provider == "openai":
+    elif body.provider in ("openai", "ollama"):
         llm = litellm_stream
     else:
         raise HTTPException(status_code=400, detail=f"Provider « {body.provider} » pas encore disponible.")
     turn = Turn(
         model=body.model,
         api_key=body.api_key or None,
+        api_base=providers.OLLAMA_URL if body.provider == "ollama" else None,
         history=[m.model_dump() for m in body.history],
         message=body.message,
     )

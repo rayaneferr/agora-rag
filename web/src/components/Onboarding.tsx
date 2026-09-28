@@ -12,7 +12,7 @@ export interface Settings {
 
 export function Onboarding({ initial, onReady }: { initial?: Settings | null; onReady: (s: Settings) => void }) {
   const [providers, setProviders] = useState<Provider[]>([]);
-  const [provider, setProvider] = useState(initial?.provider ?? "openai");
+  const [provider, setProvider] = useState(initial?.provider ?? "ollama");
   const [apiKey, setApiKey] = useState(initial?.apiKey ?? "");
   const [showKey, setShowKey] = useState(false);
   const [remember, setRemember] = useState(initial?.remember ?? false);
@@ -26,7 +26,7 @@ export function Onboarding({ initial, onReady }: { initial?: Settings | null; on
   }, []);
 
   const current = providers.find((p) => p.id === provider);
-  const needsKey = provider !== "demo";
+  const needsKey = current?.needs_key ?? true;
 
   async function check() {
     setStatus("checking");
@@ -77,7 +77,7 @@ export function Onboarding({ initial, onReady }: { initial?: Settings | null; on
                 onClick={() => pickProvider(p.id)}
               >
                 <span className="provider__name">{p.name}</span>
-                <span className="provider__meta">{p.available ? (p.id === "demo" ? "sans clé" : "disponible") : "bientôt"}</span>
+                <span className="provider__meta">{!p.available ? "bientôt" : p.needs_key ? "clé API" : "sans clé"}</span>
               </button>
             ))}
           </div>
@@ -131,7 +131,13 @@ export function Onboarding({ initial, onReady }: { initial?: Settings | null; on
               disabled={(needsKey && !apiKey.trim()) || status === "checking"}
               onClick={check}
             >
-              {status === "checking" ? "Vérification de la clé…" : needsKey ? "Vérifier la clé" : "Continuer"}
+              {status === "checking"
+                ? needsKey
+                  ? "Vérification de la clé…"
+                  : "Recherche des modèles…"
+                : needsKey
+                  ? "Vérifier la clé"
+                  : "Voir les modèles disponibles"}
             </button>
           ) : (
             <>
@@ -142,7 +148,10 @@ export function Onboarding({ initial, onReady }: { initial?: Settings | null; on
                   </option>
                 ))}
               </select>
-              <p className="hint ok">✓ Clé valide · {models.length} modèles disponibles</p>
+              <p className="hint ok">
+                ✓ {needsKey ? "Clé valide" : "Connecté"} · {models.length} modèle{models.length > 1 ? "s" : ""} disponible
+                {models.length > 1 ? "s" : ""}
+              </p>
               <button
                 type="button"
                 className="primary wide"

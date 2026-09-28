@@ -18,6 +18,9 @@ import litellm
 from agora.common import ROOT
 
 MAX_TOOL_ROUNDS = 8
+# Fenêtre de contexte des modèles Ollama : la valeur par défaut (2 à 4k tokens) tronque en silence
+# les extraits renvoyés par les outils. 16k couvre plusieurs recherches dans un même tour.
+OLLAMA_NUM_CTX = 16384
 
 SYSTEM_PROMPT = """Tu es Agora, un assistant spécialisé en cinéma et en vie parlementaire française.
 Tu disposes d'outils de recherche sur deux bases : des synopsis de films (Wikipedia, en anglais) et les
@@ -26,6 +29,8 @@ comptes rendus des séances de l'Assemblée nationale (17e législature, depuis 
 - Appuie-toi sur ces outils plutôt que sur ta mémoire. Si les résultats sont décevants, reformule
   (par exemple en anglais pour les films) ou relance une recherche avec d'autres filtres.
 - Pour une question sur une personne, trouve d'abord son nom exact avec find_orateurs.
+- N'ajoute pas de filtre (dates, genre, réalisateur…) que l'utilisateur n'a pas demandé. Si une recherche
+  filtrée ne renvoie rien, relance-la avec moins de filtres avant de conclure.
 - Cite tes sources : titre et année pour un film ; orateur, date et lien de la séance pour un débat.
 - Si les outils ne trouvent rien, dis-le au lieu d'inventer.
 - Réponds en français, de façon claire et structurée (Markdown)."""
@@ -37,6 +42,7 @@ class Turn:
 
     model: str
     api_key: str | None
+    api_base: str | None = None  # ex. serveur Ollama
     history: list[dict] = field(default_factory=list)  # [{"role": "user"|"assistant", "content": str}]
     message: str = ""
 
@@ -129,7 +135,9 @@ async def litellm_stream(turn: Turn, messages: list[dict], tools: list[dict]) ->
             messages=messages,
             tools=tools,
             api_key=turn.api_key,
+            api_base=turn.api_base,
             stream=True,
+            **({"num_ctx": OLLAMA_NUM_CTX} if turn.model.startswith("ollama") else {}),
             stream_options={"include_usage": True},
         )
         chunks = []

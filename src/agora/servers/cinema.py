@@ -32,8 +32,8 @@ def search_films(
             Les synopsis sont en anglais ; une requête en anglais donne souvent de meilleurs résultats.
         genre: filtre texte sur le genre (ex. « comedy », « horror »).
         director: filtre texte sur le réalisateur (ex. « Nolan »).
-        year_min: année de sortie minimale.
-        year_max: année de sortie maximale.
+        year_min: année de sortie minimale (seulement si l'utilisateur précise une période).
+        year_max: année de sortie maximale (seulement si l'utilisateur précise une période).
         limit: nombre de films à retourner (1-20).
     """
     must: list[models.Condition] = []
