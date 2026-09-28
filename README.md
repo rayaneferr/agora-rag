@@ -49,7 +49,8 @@ est plus modeste).
 
 ```bash
 uv sync
-docker run -d --name agora-qdrant -p 6333:6333 -v "$PWD/qdrant_storage:/qdrant/storage" qdrant/qdrant
+docker run -d --name agora-qdrant --restart unless-stopped -p 6333:6333 \
+  -v "$PWD/qdrant_storage:/qdrant/storage" qdrant/qdrant:v1.19.1
 
 # Archives : téléchargées depuis Hugging Face et restaurées (quelques minutes)…
 uv run agora-index import
@@ -60,6 +61,13 @@ uv run python -m agora.contexts.assemblee.ingestion    # --limit-seances 20 pour
 (cd web && npm install && npm run build)
 uv run agora                                           # ouvre http://127.0.0.1:8765
 ```
+
+> **Colima avec plusieurs profils** : `docker` vise le contexte actif (`docker context ls`). Préfixe la commande
+> par `docker --context colima …` pour que Qdrant tourne dans la VM par défaut et que ses données restent dans
+> `qdrant_storage/` du dépôt, pas dans une VM d'un autre projet.
+
+Hors ligne une fois installé : bge-m3 est chargé depuis le cache local, les polices sont embarquées dans le
+build, et seul Ollama (`localhost:11434`) et Qdrant (`localhost:6333`) sont appelés.
 
 Parcours : **l'Agora** (choix du modèle local) → **le Forum** (choix du guide) → **la salle** du contexte,
 qui prend l'identité visuelle de son lieu.

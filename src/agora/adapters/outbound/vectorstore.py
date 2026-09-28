@@ -27,7 +27,10 @@ def _load_embedder():
     from sentence_transformers import SentenceTransformer
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
-    model = SentenceTransformer(EMBED_MODEL, device=device)
+    try:  # modèle déjà en cache : aucun appel au Hub
+        model = SentenceTransformer(EMBED_MODEL, device=device, local_files_only=True)
+    except OSError:  # premier lancement : téléchargement (~2 Go), une seule fois
+        model = SentenceTransformer(EMBED_MODEL, device=device)
     if device == "mps":
         model.half()
     return model
