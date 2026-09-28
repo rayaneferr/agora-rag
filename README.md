@@ -86,8 +86,8 @@ en mémoire, avec Qdrant en mode `:memory:` et un embedder factice.
 - [ ] **v0.2.0** — tests, lint, CI, serveurs MCP en HTTP, ingestion complète + export d'index
 - [ ] **v0.3.0** — backend FastAPI (validation de clé, liste des modèles, chat en streaming)
 - [ ] **v0.4.0** — front React : saisie de la clé (OpenAI / Gemini / Anthropic), chat, sources, stats
-- [ ] **v0.5.0** — déploiement `docker compose` complet + démo hébergée
-- [ ] **v0.6.0** — groupes politiques, historique, choix des corpus
+- [ ] **v0.5.0** — installation locale en une commande : Qdrant + restauration automatique du snapshot + bge-m3 + app
+- [ ] **v0.6.0** — groupes politiques, historique, choix des corpus, mise à jour incrémentale des séances
 - [ ] **v0.7.0** — benchmark : qualité du retrieval, exactitude des citations, latence/coût par modèle
 
 ## Licence
