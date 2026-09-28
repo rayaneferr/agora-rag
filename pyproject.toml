@@ -23,6 +23,7 @@ dependencies = [
 agora = "agora.adapters.inbound.api:main"
 agora-chat = "agora.adapters.inbound.cli:main"
 agora-index = "agora.adapters.outbound.index_hub:main"
+agora-mcp-public = "agora.adapters.inbound.mcp_public:main"
 mcp-cinema = "agora.contexts.cinema.server:main"
 mcp-assemblee = "agora.contexts.assemblee.server:main"
 
