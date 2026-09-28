@@ -38,6 +38,8 @@ def _date_int(d: str | None) -> int | None:
 def _format(p: dict, score: float | None = None) -> dict:
     out = {
         "orateur": p["orateur"],
+        # Groupe seulement quand le compte rendu l'indique ; le référentiel complet des députés viendra en v0.6.
+        "groupe": p.get("groupe"),
         "qualite": p["qualite"] or None,
         "date": p["date"],
         "sujet": p["sujet"],
@@ -78,7 +80,7 @@ def search_debats(
 
     Args:
         query: sujet ou question en langage naturel (ex. « réforme des retraites, âge légal »).
-        orateur: nom EXACT de l'orateur, obtenu via find_orateurs (ex. « M. Éric Coquerel »).
+        orateur: nom EXACT de l'orateur, obtenu via find_orateurs (ex. « Éric Coquerel », sans civilité).
         date_min: date minimale incluse, format AAAA-MM-JJ.
         date_max: date maximale incluse, format AAAA-MM-JJ.
         limit: nombre d'extraits à retourner (1-20).

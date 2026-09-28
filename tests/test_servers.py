@@ -58,12 +58,12 @@ async def test_get_film_inconnu():
 
 async def test_find_orateurs_insensible_aux_accents_et_a_la_casse():
     res = await call(mcp_assemblee, "find_orateurs", nom="DUBOIS")
-    assert res == [{"orateur": "Mme Claire Dubois", "nb_interventions": 1}]
+    assert res == [{"orateur": "Claire Dubois", "nb_interventions": 2}]
 
 
 async def test_search_debats_filtre_orateur():
-    res = await call(mcp_assemblee, "search_debats", query="enseignants", orateur="Mme Claire Dubois")
-    assert res and all(r["orateur"] == "Mme Claire Dubois" for r in res)
+    res = await call(mcp_assemblee, "search_debats", query="enseignants", orateur="Claire Dubois")
+    assert res and all(r["orateur"] == "Claire Dubois" for r in res)
 
 
 async def test_search_debats_filtre_dates():
@@ -73,4 +73,15 @@ async def test_search_debats_filtre_dates():
 
 async def test_get_contexte_ordre_chronologique():
     res = await call(mcp_assemblee, "get_contexte", seance_uid="CRSANR5L17S2025O1N999", ordre=11, avant=1, apres=1)
-    assert [r["orateur"] for r in res] == ["Mme Alice Martin", "Mme Claire Dubois", "M. Bruno Petit"]
+    assert [r["orateur"] for r in res] == ["Alice Martin", "Claire Dubois", "Bruno Petit"]
+
+
+async def test_search_films_dedoublonne_titre_annee():
+    films = await call(mcp_cinema, "search_films", query="spaceship alien creature", limit=10)
+    assert [f["title"] for f in films].count("Alien") == 1
+
+
+async def test_search_debats_expose_le_groupe():
+    res = await call(mcp_assemblee, "search_debats", query="publicité ciblée enfants", orateur="Denis Roux")
+    assert res[0]["groupe"] == "RN"
+    assert res[0]["section"] == "Protection des enfants" and res[0]["sujet"] == "Article 11"

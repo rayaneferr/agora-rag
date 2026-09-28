@@ -51,21 +51,26 @@ def search_films(
             COLLECTION_FILMS,
             query=embed([query])[0],
             group_by="film_id",
-            limit=max(1, min(limit, 20)),
+            # Marge pour absorber les doublons du dataset (même film sous deux « origines »).
+            limit=2 * max(1, min(limit, 20)),
             group_size=1,
             query_filter=models.Filter(must=must) if must else None,
             with_payload=True,
         )
         .groups
     )
-    results = []
+    results, seen = [], set()
     for g in groups:
         hit = g.hits[0]
         p = hit.payload
+        key = (p["title"].strip().lower(), p["year"])
+        if key in seen:
+            continue
+        seen.add(key)
         results.append(
             {
                 "film_id": p["film_id"],
-                "title": p["title"],
+                "title": p["title"].strip(),
                 "year": p["year"],
                 "director": p["director"],
                 "genre": p["genre"],
@@ -76,7 +81,7 @@ def search_films(
                 "wiki_url": p["wiki_url"],
             }
         )
-    return results
+    return results[: max(1, min(limit, 20))]
 
 
 @mcp.tool()

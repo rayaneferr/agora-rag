@@ -25,8 +25,30 @@ MIN_CHARS = 120  # sous ce seuil : « La parole est à… », « Très bien ! »
 BATCH = 128
 
 
+# Titres de points qui ne disent rien du sujet. Les débats qui suivent une suspension sont rangés
+# *dans* le point « Suspension et reprise de la séance » : on garde donc le titre précédent.
+TITRES_IGNORES = re.compile(
+    r"^(Suspension et reprise de la séance|Suite de la discussion d.*|Discussion des articles( \(suite\))?)$"
+)
+
+
 def text_of(el) -> str:
     return re.sub(r"\s+", " ", " ".join(el.itertext())).strip() if el is not None else ""
+
+
+def split_orateur(raw: str) -> tuple[str, str | None, str | None]:
+    """« M. Éric Coquerel (LFI-NFP) » → (« Éric Coquerel », « M. », « LFI-NFP »).
+
+    Les comptes rendus écrivent le même orateur avec ou sans civilité, avec ou sans groupe :
+    on normalise pour que filtres et agrégations portent sur une seule forme.
+    """
+    groupe = None
+    if m := re.match(r"^(.*?)\s*\(([^()]+)\)$", raw):
+        raw, groupe = m.group(1), m.group(2)
+    civilite = None
+    if m := re.match(r"^(M\.|Mme|Mlle)\s+(.*)$", raw):
+        civilite, raw = m.group(1), m.group(2)
+    return raw.strip(), civilite, groupe
 
 
 def parse_seance(xml_bytes: bytes) -> Iterator[dict]:
@@ -37,14 +59,16 @@ def parse_seance(xml_bytes: bytes) -> Iterator[dict]:
 
     # Passe 1 : paragraphes de fond, regroupés par point de l'ordre du jour.
     points: list[list[dict]] = [[]]
-    section, sujet = "", ""
+    titres: dict[int, str] = {}  # niveau du point → titre ; les points sont à plat dans le XML
     for el in root.iter("{*}point", "{*}paragraphe"):
         if el.tag.endswith("point"):
             points.append([])
             title = text_of(el.find("an:texte", NS))
-            if el.get("nivpoint") == "1":
-                section = title
-            sujet = title
+            niveau = int(el.get("nivpoint") or 1)
+            # Les points sans titre (blocs d'amendements) et les titres génériques héritent du parent.
+            if title and not TITRES_IGNORES.match(title):
+                titres = {n: t for n, t in titres.items() if n < niveau}
+                titres[niveau] = title
             continue
         acteur = el.get("id_acteur")
         texte = text_of(el.find("an:texte", NS))
@@ -53,16 +77,20 @@ def parse_seance(xml_bytes: bytes) -> Iterator[dict]:
         if el.get("roledebat") == "president":
             continue  # police de séance, pas de fond
         orateur = el.find("an:orateurs/an:orateur", NS)
+        nom, civilite, groupe = split_orateur(text_of(orateur.find("an:nom", NS)) if orateur is not None else "")
+        chemin = [titres[n] for n in sorted(titres)]
         points[-1].append(
             {
                 "seance_uid": uid,
                 "date": d.isoformat(),
                 "date_int": int(d.strftime("%Y%m%d")),
-                "section": section,
-                "sujet": sujet,
+                "section": chemin[0] if chemin else "",
+                "sujet": " › ".join(chemin[1:]),
                 "ordre": int(el.get("ordre_absolu_seance", 0)),
                 "id_acteur": acteur,
-                "orateur": text_of(orateur.find("an:nom", NS)) if orateur is not None else "",
+                "orateur": nom,
+                "civilite": civilite,
+                "groupe": groupe,
                 "qualite": text_of(orateur.find("an:qualite", NS)) if orateur is not None else "",
                 "role": el.get("roledebat") or "",
                 "text": texte,
@@ -113,7 +141,7 @@ def ensure_collection(client, dim: int, recreate: bool = False) -> None:
     client.create_collection(
         COLLECTION_DEBATS, vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE)
     )
-    for field in ("orateur", "id_acteur", "seance_uid"):
+    for field in ("orateur", "groupe", "id_acteur", "seance_uid"):
         client.create_payload_index(COLLECTION_DEBATS, field, models.PayloadSchemaType.KEYWORD)
     client.create_payload_index(COLLECTION_DEBATS, "date_int", models.PayloadSchemaType.INTEGER)
     client.create_payload_index(COLLECTION_DEBATS, "ordre", models.PayloadSchemaType.INTEGER)
@@ -122,7 +150,8 @@ def ensure_collection(client, dim: int, recreate: bool = False) -> None:
 
 def to_chunks(inter: dict) -> list[tuple[str, dict]]:
     # Contexte en tête de chunk : qui parle, de quoi — sinon « je suis contre » ne veut rien dire.
-    header = f"{inter['orateur']} ({inter['date']}) — {inter['sujet']}"
+    sujet = " › ".join(t for t in (inter["section"], inter["sujet"]) if t)
+    header = f"{inter['orateur']} ({inter['date']}) — {sujet}"
     return [
         (f"{header}\n{chunk}", {**inter, "chunk_index": i, "text": chunk})
         for i, chunk in enumerate(chunk_text(inter["text"]))

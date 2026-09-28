@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from agora.common import chunk_text, join_chunks
-from agora.ingestion.assemblee import parse_seance, to_chunks
+from agora.ingestion.assemblee import parse_seance, split_orateur, to_chunks
 
 SEANCE = (Path(__file__).parent / "fixtures" / "seance.xml").read_bytes()
 
@@ -12,7 +12,7 @@ def interventions():
 
 def test_decoupe_par_intervention():
     orateurs = [i["orateur"] for i in interventions()]
-    assert orateurs == ["Mme Alice Martin", "Mme Claire Dubois", "M. Bruno Petit"]
+    assert orateurs == ["Alice Martin", "Claire Dubois", "Bruno Petit", "Denis Roux", "Claire Dubois"]
 
 
 def test_exclut_presidence_et_didascalies():
@@ -22,7 +22,7 @@ def test_exclut_presidence_et_didascalies():
 
 
 def test_interjection_ne_coupe_pas_l_intervention():
-    ministre = next(i for i in interventions() if i["orateur"] == "Mme Claire Dubois")
+    ministre = next(i for i in interventions() if i["orateur"] == "Claire Dubois")
     assert "priorité absolue" in ministre["text"]
     assert "vérification de l’âge" in ministre["text"]
     assert "Très bien" not in ministre["text"]
@@ -44,15 +44,37 @@ def test_br_ne_colle_pas_les_phrases():
 
 
 def test_qualite_ministre():
-    ministre = next(i for i in interventions() if i["orateur"] == "Mme Claire Dubois")
+    ministre = next(i for i in interventions() if i["orateur"] == "Claire Dubois")
     assert ministre["qualite"] == "ministre du numérique"
 
 
 def test_chunk_prefixe_orateur_et_sujet():
     text, payload = to_chunks(interventions()[0])[0]
-    assert text.startswith("Mme Alice Martin (2024-11-06) — Régulation des réseaux sociaux\n")
+    assert text.startswith("Alice Martin (2024-11-06) — Questions au Gouvernement › Régulation des réseaux sociaux\n")
     assert payload["chunk_index"] == 0
-    assert "Mme Alice Martin" not in payload["text"]
+    assert "Alice Martin" not in payload["text"]
+
+
+def test_orateur_normalise():
+    assert split_orateur("M. Éric Coquerel (LFI-NFP)") == ("Éric Coquerel", "M.", "LFI-NFP")
+    assert split_orateur("Mme Louise Morel") == ("Louise Morel", "Mme", None)
+    assert split_orateur("François Bayrou") == ("François Bayrou", None, None)
+
+
+def test_groupe_extrait_du_nom():
+    roux = next(i for i in interventions() if i["orateur"] == "Denis Roux")
+    assert (roux["civilite"], roux["groupe"]) == ("M.", "RN")
+
+
+def test_hierarchie_des_titres():
+    roux = next(i for i in interventions() if i["orateur"] == "Denis Roux")
+    # Point de niveau 4 sans titre et « Discussion des articles » générique : hérités / ignorés.
+    assert (roux["section"], roux["sujet"]) == ("Protection des enfants", "Article 11")
+
+
+def test_suspension_garde_le_sujet_en_cours():
+    avis = [i for i in interventions() if i["orateur"] == "Claire Dubois"][-1]
+    assert avis["sujet"] == "Article 11"
 
 
 def test_chunk_text_court():

@@ -54,5 +54,33 @@
         <texte>Monsieur le ministre, la suppression de quatre mille postes d’enseignants va dégrader les conditions d’apprentissage de nos élèves dans les zones rurales.</texte>
       </paragraphe>
     </point>
+    <point nivpoint="1" ordre_absolu_seance="30">
+      <orateurs/>
+      <texte>Protection des enfants</texte>
+    </point>
+    <point nivpoint="2" ordre_absolu_seance="31">
+      <orateurs/>
+      <texte>Discussion des articles (suite)</texte>
+    </point>
+    <point nivpoint="3" ordre_absolu_seance="32">
+      <orateurs/>
+      <texte>Article 11</texte>
+    </point>
+    <point nivpoint="4" ordre_absolu_seance="33">
+      <orateurs/>
+      <texte/>
+      <paragraphe ordre_absolu_seance="34" id_acteur="PA000005">
+        <orateurs><orateur><nom>M. Denis Roux (RN)</nom><id>5</id><qualite/></orateur></orateurs>
+        <texte>Cet amendement vise à interdire la publicité ciblée à destination des enfants de moins de quinze ans sur toutes les plateformes.</texte>
+      </paragraphe>
+    </point>
+    <point nivpoint="3" ordre_absolu_seance="40">
+      <orateurs/>
+      <texte>Suspension et reprise de la séance</texte>
+      <paragraphe ordre_absolu_seance="41" id_acteur="PA000003">
+        <orateurs><orateur><nom>Claire Dubois</nom><id>3</id><qualite>ministre du numérique</qualite></orateur></orateurs>
+        <texte>Avis défavorable sur cet amendement, car la directive européenne encadre déjà strictement la publicité ciblée envers les mineurs.</texte>
+      </paragraphe>
+    </point>
   </contenu>
 </compteRendu>
