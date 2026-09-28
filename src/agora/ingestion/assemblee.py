@@ -35,52 +35,63 @@ def parse_seance(xml_bytes: bytes) -> Iterator[dict]:
     raw_date = root.findtext("an:metadonnees/an:dateSeance", namespaces=NS)  # 20241106140000000
     d = date(int(raw_date[:4]), int(raw_date[4:6]), int(raw_date[6:8]))
 
+    # Passe 1 : paragraphes de fond, regroupés par point de l'ordre du jour.
+    points: list[list[dict]] = [[]]
     section, sujet = "", ""
-    current: dict | None = None
-
-    def flush():
-        if current and len(current["text"]) >= MIN_CHARS:
-            yield current
-
     for el in root.iter("{*}point", "{*}paragraphe"):
         if el.tag.endswith("point"):
-            yield from flush()
-            current = None
+            points.append([])
             title = text_of(el.find("an:texte", NS))
             if el.get("nivpoint") == "1":
-                section, sujet = title, title
-            else:
-                sujet = title
+                section = title
+            sujet = title
             continue
-
         acteur = el.get("id_acteur")
         texte = text_of(el.find("an:texte", NS))
         if not acteur or not texte:
             continue  # didascalies : (Applaudissements…), (La séance est suspendue.)
         if el.get("roledebat") == "president":
             continue  # police de séance, pas de fond
-        if current and current["id_acteur"] == acteur:
-            current["text"] += "\n" + texte
-            continue
-        if current and len(texte) < MIN_CHARS:
-            continue  # interjection d'un autre orateur (« Très bien ! ») : ne coupe pas l'intervention
-        yield from flush()
         orateur = el.find("an:orateurs/an:orateur", NS)
-        current = {
-            "seance_uid": uid,
-            "date": d.isoformat(),
-            "date_int": int(d.strftime("%Y%m%d")),
-            "section": section,
-            "sujet": sujet,
-            "ordre": int(el.get("ordre_absolu_seance", 0)),
-            "id_acteur": acteur,
-            "orateur": text_of(orateur.find("an:nom", NS)) if orateur is not None else "",
-            "qualite": text_of(orateur.find("an:qualite", NS)) if orateur is not None else "",
-            "role": el.get("roledebat") or "",
-            "text": texte,
-            "url": f"https://www.assemblee-nationale.fr/dyn/17/comptes-rendus/seance/{uid}",
-        }
-    yield from flush()
+        points[-1].append(
+            {
+                "seance_uid": uid,
+                "date": d.isoformat(),
+                "date_int": int(d.strftime("%Y%m%d")),
+                "section": section,
+                "sujet": sujet,
+                "ordre": int(el.get("ordre_absolu_seance", 0)),
+                "id_acteur": acteur,
+                "orateur": text_of(orateur.find("an:nom", NS)) if orateur is not None else "",
+                "qualite": text_of(orateur.find("an:qualite", NS)) if orateur is not None else "",
+                "role": el.get("roledebat") or "",
+                "text": texte,
+                "url": f"https://www.assemblee-nationale.fr/dyn/17/comptes-rendus/seance/{uid}",
+            }
+        )
+
+    # Passe 2 : on retire les interjections (A, « Très bien ! » de B, A) puis on fusionne
+    # les paragraphes consécutifs d'un même orateur en une intervention.
+    for paras in points:
+        kept = [
+            p
+            for i, p in enumerate(paras)
+            if not (
+                len(p["text"]) < MIN_CHARS
+                and 0 < i < len(paras) - 1
+                and paras[i - 1]["id_acteur"] == paras[i + 1]["id_acteur"] != p["id_acteur"]
+            )
+        ]
+        current: dict | None = None
+        for p in kept:
+            if current and current["id_acteur"] == p["id_acteur"]:
+                current["text"] += "\n" + p["text"]
+                continue
+            if current and len(current["text"]) >= MIN_CHARS:
+                yield current
+            current = dict(p)
+        if current and len(current["text"]) >= MIN_CHARS:
+            yield current
 
 
 def iter_interventions(limit_seances: int | None) -> Iterator[dict]:
@@ -94,6 +105,46 @@ def iter_interventions(limit_seances: int | None) -> Iterator[dict]:
             yield from parse_seance(zf.read(name))
 
 
+def ensure_collection(client, dim: int, recreate: bool = False) -> None:
+    if recreate and client.collection_exists(COLLECTION_DEBATS):
+        client.delete_collection(COLLECTION_DEBATS)
+    if client.collection_exists(COLLECTION_DEBATS):
+        return
+    client.create_collection(
+        COLLECTION_DEBATS, vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE)
+    )
+    for field in ("orateur", "id_acteur", "seance_uid"):
+        client.create_payload_index(COLLECTION_DEBATS, field, models.PayloadSchemaType.KEYWORD)
+    client.create_payload_index(COLLECTION_DEBATS, "date_int", models.PayloadSchemaType.INTEGER)
+    client.create_payload_index(COLLECTION_DEBATS, "ordre", models.PayloadSchemaType.INTEGER)
+    client.create_payload_index(COLLECTION_DEBATS, "sujet", models.PayloadSchemaType.TEXT)
+
+
+def to_chunks(inter: dict) -> list[tuple[str, dict]]:
+    # Contexte en tête de chunk : qui parle, de quoi — sinon « je suis contre » ne veut rien dire.
+    header = f"{inter['orateur']} ({inter['date']}) — {inter['sujet']}"
+    return [
+        (f"{header}\n{chunk}", {**inter, "chunk_index": i, "text": chunk})
+        for i, chunk in enumerate(chunk_text(inter["text"]))
+    ]
+
+
+def index(client, items: list[tuple[str, dict]], embed_fn=embed) -> None:
+    vectors = embed_fn([text for text, _ in items])
+    client.upsert(
+        COLLECTION_DEBATS,
+        points=[
+            models.PointStruct(
+                # Id déterministe : relancer l'ingestion met à jour au lieu de dupliquer.
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{p['seance_uid']}/{p['ordre']}/{p['chunk_index']}")),
+                vector=v,
+                payload=p,
+            )
+            for v, (_, p) in zip(vectors, items, strict=True)
+        ],
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit-seances", type=int, help="Nombre de séances (pour tester vite)")
@@ -101,49 +152,19 @@ def main() -> None:
     args = parser.parse_args()
 
     client = qdrant()
-    if args.recreate and client.collection_exists(COLLECTION_DEBATS):
-        client.delete_collection(COLLECTION_DEBATS)
-    if not client.collection_exists(COLLECTION_DEBATS):
-        client.create_collection(
-            COLLECTION_DEBATS,
-            vectors_config=models.VectorParams(size=embedding_dim(), distance=models.Distance.COSINE),
-        )
-        for field in ("orateur", "id_acteur", "seance_uid"):
-            client.create_payload_index(COLLECTION_DEBATS, field, models.PayloadSchemaType.KEYWORD)
-        client.create_payload_index(COLLECTION_DEBATS, "date_int", models.PayloadSchemaType.INTEGER)
-        client.create_payload_index(COLLECTION_DEBATS, "ordre", models.PayloadSchemaType.INTEGER)
-        client.create_payload_index(COLLECTION_DEBATS, "sujet", models.PayloadSchemaType.TEXT)
-
+    ensure_collection(client, embedding_dim(), args.recreate)
     batch: list[tuple[str, dict]] = []
     total = 0
-
-    def push():
-        nonlocal total
-        vectors = embed([t for t, _ in batch])
-        client.upsert(
-            COLLECTION_DEBATS,
-            points=[
-                models.PointStruct(
-                    id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{p['seance_uid']}/{p['ordre']}/{p['chunk_index']}")),
-                    vector=v,
-                    payload=p,
-                )
-                for v, (_, p) in zip(vectors, batch)
-            ],
-        )
-        total += len(batch)
-        print(f"  {total} chunks indexés")
-        batch.clear()
-
     for inter in iter_interventions(args.limit_seances):
-        for i, chunk in enumerate(chunk_text(inter["text"])):
-            # Contexte en tête de chunk : qui parle, de quoi — sinon « je suis contre » ne veut rien dire.
-            header = f"{inter['orateur']} ({inter['date']}) — {inter['sujet']}"
-            batch.append((f"{header}\n{chunk}", {**inter, "chunk_index": i, "text": chunk}))
+        batch.extend(to_chunks(inter))
         if len(batch) >= BATCH:
-            push()
+            index(client, batch)
+            total += len(batch)
+            print(f"  {total} chunks indexés")
+            batch = []
     if batch:
-        push()
+        index(client, batch)
+        print(f"  {total + len(batch)} chunks indexés")
 
 
 if __name__ == "__main__":
