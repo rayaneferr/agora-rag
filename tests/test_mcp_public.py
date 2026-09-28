@@ -15,6 +15,7 @@ HEADERS = {"accept": "application/json, text/event-stream", "content-type": "app
 def make_client():
     def make(**kwargs):
         kwargs.setdefault("allowed_hosts", [HOST])
+        kwargs.setdefault("embedder_loaded", lambda: True)
         app = mcp_public.create_app(warm_up=lambda: None, **kwargs)  # pas de bge-m3 pendant les tests
         return TestClient(app, base_url=f"http://{HOST}")
 
@@ -32,6 +33,14 @@ def test_health_decrit_chaque_contexte(make_client):
     assert body["status"] == "ok"
     assert body["contexts"]["cinema"]["endpoint"] == "/cinema/mcp"
     assert body["contexts"]["assemblee"]["etendue"] == "séances du 6 novembre 2024 au 6 novembre 2024"
+
+
+def test_health_indisponible_pendant_le_chargement_du_modele(make_client):
+    # Le premier appel attendrait le chargement de bge-m3 (~20 s) : la sonde doit le dire.
+    with make_client(embedder_loaded=lambda: False) as client:
+        response = client.get("/health")
+    assert response.status_code == 503
+    assert response.json()["status"] == "starting" and response.json()["embedder"] == "loading"
 
 
 def test_chaque_contexte_a_ses_outils(make_client):

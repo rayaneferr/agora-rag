@@ -50,6 +50,11 @@ def embedder():
         return _load_embedder()
 
 
+def embedder_loaded() -> bool:
+    """Le modèle est-il en mémoire ? Tant que non, le premier appel d'outil attend son chargement (~20 s)."""
+    return _load_embedder.cache_info().currsize > 0
+
+
 def warm_up() -> None:
     """Charge le modèle en tâche de fond : le handshake MCP n'attend pas, et le premier appel d'outil non plus."""
     os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
