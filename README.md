@@ -130,12 +130,13 @@ sur une base LanceDB temporaire, avec un embedder factice et le modèle de démo
 ## Feuille de route
 
 - [x] **v0.1.0** — CLI + 2 serveurs MCP (RAG cinéma et Assemblée nationale)
-- [ ] **v0.2.0** — tests, lint, CI, serveurs MCP en HTTP, ingestion complète + export d'index
-- [ ] **v0.3.0** — application locale : architecture hexagonale par contextes, Ollama, identité visuelle par lieu
-- [ ] **v0.4.0** — mascottes par guide, historique des conversations, regroupement des extraits par intervention
-- [ ] **v0.5.0** — installation sans Docker : index embarqué (LanceDB) téléchargé au premier lancement, front précompilé
-- [ ] **v0.6.0** — groupes politiques, mise à jour incrémentale des séances, nouveaux contextes
-- [ ] **v0.7.0** — benchmark : qualité du retrieval (dense vs hybride), exactitude des citations, latence par modèle local
+- [x] **v0.2** — tests, lint, CI, serveurs MCP en HTTP, ingestion complète + export d'index
+- [x] **v0.3** — application locale : architecture hexagonale par contextes, Ollama, sans clé API
+- [x] **v0.4** — installation sans Docker : index embarqué (LanceDB) publié sur Hugging Face, 100 % hors ligne
+- [x] **v0.5.0** — interface épurée : recherches MCP repliables, sources compactes, thème clair/sombre
+- [ ] **v0.6.0** — historique des conversations, regroupement des extraits par intervention
+- [ ] **v0.7.0** — groupes politiques, mise à jour incrémentale des séances, nouveaux contextes
+- [ ] **v0.8.0** — benchmark : qualité du retrieval (dense vs hybride), exactitude des citations, latence par modèle local
 
 ## Licence
 

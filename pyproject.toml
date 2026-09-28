@@ -1,6 +1,6 @@
 [project]
 name = "agora-rag"
-version = "0.1.0"
+version = "0.5.0"
 description = "Agents conversationnels locaux, un par contexte (base indexée + serveur MCP) : cinéma, Assemblée nationale"
 authors = [
     { name = "Rayane", email = "rferrat@luccasoftware.com" }
