@@ -21,6 +21,7 @@ dependencies = [
 agora-chat = "agora.client:main"
 mcp-cinema = "agora.servers.cinema:main"
 mcp-assemblee = "agora.servers.assemblee:main"
+agora-index = "agora.snapshots:main"
 
 [build-system]
 requires = ["uv_build>=0.12.17,<0.13.0"]
