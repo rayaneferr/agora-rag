@@ -13,7 +13,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parents[4]  # racine du dépôt (web/dist, .env)
+ROOT = Path(__file__).resolve().parents[4]  # racine du dépôt (.env, data/)
 
 load_dotenv(ROOT / ".env")
 

@@ -27,7 +27,7 @@ from agora.contexts import CONTEXTS
 
 COLLECTIONS = [c for spec in CONTEXTS.values() for c in spec.collections]
 HF_REPO = os.getenv("AGORA_HF_REPO", "rferrat/agora-rag-index")
-# Commit du dataset que l'application accepte. À mettre à jour à chaque `agora-index publish`.
+# Commit du dataset que les serveurs acceptent. À mettre à jour à chaque `agora-index publish`.
 INDEX_REVISION = os.getenv("AGORA_INDEX_REVISION", "fc60445f270a8617ce109eaef423a4873ed0fb2a")
 MANIFEST = "manifest.json"
 PREFIX = "lancedb"  # dossier de l'index dans le dataset
@@ -85,16 +85,6 @@ def verify(local_dir: Path, files: list[RemoteFile]) -> None:
         raise IntegrityError("Index refusé :\n  " + "\n  ".join(problems))
 
 
-def download_progress(local_dir: Path, files: list[RemoteFile]) -> tuple[int, int]:
-    """(octets présents, octets attendus) : les fichiers finis plus les téléchargements en cours."""
-    total = sum(f.size for f in files)
-    done = sum(min((local_dir / f.path).stat().st_size, f.size) for f in files if (local_dir / f.path).is_file())
-    partial = local_dir / ".cache" / "huggingface" / "download"
-    if partial.is_dir():
-        done += sum(p.stat().st_size for p in partial.rglob("*.incomplete"))
-    return min(done, total), total
-
-
 def _size(name: str) -> int:
     return sum(f.stat().st_size for f in (vs.DB_DIR / f"{name}.lance").rglob("*") if f.is_file())
 
@@ -146,7 +136,9 @@ def publish(collections: list[str]) -> None:
     api.upload_file(path_or_fileobj=card, path_in_repo="README.md", repo_id=HF_REPO, repo_type="dataset")
     sha = api.dataset_info(HF_REPO).sha
     print(f"https://huggingface.co/datasets/{HF_REPO}/tree/{sha}")
-    print(f"Nouvelle révision : {sha}\nÀ reporter dans INDEX_REVISION (index_hub.py) pour que l'application l'accepte.")
+    print(
+        f"Nouvelle révision : {sha}\nÀ reporter dans INDEX_REVISION (index_hub.py) pour que les serveurs l'acceptent."
+    )
 
 
 def index_files(name: str) -> list[RemoteFile]:
@@ -160,11 +152,8 @@ def read_manifest() -> dict:
     return json.loads(Path(path).read_text())
 
 
-def import_(collections: list[str], progress: dict | None = None) -> None:
-    """Télécharge les tables demandées à la révision épinglée, puis vérifie chaque fichier.
-
-    `progress` (optionnel) reçoit {"done", "total"} en octets, mis à jour par l'appelant via download_progress.
-    """
+def import_(collections: list[str]) -> None:
+    """Télécharge les tables demandées à la révision épinglée, puis vérifie chaque fichier."""
     from huggingface_hub import snapshot_download
 
     manifest = read_manifest()
@@ -173,8 +162,6 @@ def import_(collections: list[str], progress: dict | None = None) -> None:
         if expected != vs.EMBED_MODEL:
             raise SystemExit(f"{name}: l'index a été construit avec {expected}, mais EMBED_MODEL={vs.EMBED_MODEL}")
         files = index_files(name)
-        if progress is not None:
-            progress.setdefault("files", []).extend(files)
         print(f"{name}: téléchargement depuis huggingface.co/datasets/{HF_REPO} @ {INDEX_REVISION[:10]}…")
         snapshot_download(
             HF_REPO,
@@ -193,22 +180,7 @@ def verify_local(collections: list[str]) -> None:
         print(f"{name}: conforme à la révision {INDEX_REVISION[:10]}")
 
 
-def ensure_index(progress: dict | None = None) -> None:
-    """Télécharge les tables absentes : appelé au démarrage de l'application."""
-    missing = [name for name in COLLECTIONS if not vs.has_table(name)]
-    if missing:
-        import_(missing, progress)
-
-
 # --- modèle d'embeddings -------------------------------------------------------------------------------------
-
-
-def embedder_files() -> list[RemoteFile]:
-    from huggingface_hub.utils import filter_repo_objects
-
-    files = remote_files(vs.EMBED_MODEL, "model", vs.EMBED_REVISION)
-    kept = set(filter_repo_objects([f.path for f in files], ignore_patterns=EMBED_IGNORE))
-    return [f for f in files if f.path in kept]
 
 
 def embedder_ready() -> bool:
@@ -225,18 +197,8 @@ def embedder_ready() -> bool:
         return False
 
 
-def embedder_progress(files: list[RemoteFile]) -> tuple[int, int]:
-    """Octets du modèle déjà dans le cache Hugging Face (blobs finis et en cours)."""
-    from huggingface_hub.constants import HF_HUB_CACHE
-
-    blobs = Path(HF_HUB_CACHE) / f"models--{vs.EMBED_MODEL.replace('/', '--')}" / "blobs"
-    total = sum(f.size for f in files)
-    done = sum(p.stat().st_size for p in blobs.glob("*") if p.is_file()) if blobs.is_dir() else 0
-    return min(done, total), total
-
-
 def ensure_embedder() -> None:
-    """Télécharge bge-m3 (~2,3 Go) une fois pour toutes, hors du sous-processus MCP : l'attente est visible."""
+    """Télécharge bge-m3 (~2,3 Go) une fois pour toutes, avant le premier lancement d'un serveur MCP."""
     from huggingface_hub import snapshot_download
 
     if embedder_ready():

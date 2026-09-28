@@ -1,13 +1,11 @@
-"""Un contexte délimité = une base indexée + un serveur MCP + une identité (persona, thème, prompts).
+"""Un contexte délimité = une base indexée + un serveur MCP + une description (archives, provenance, licence).
 
-Le cœur ne connaît les contextes qu'à travers ce contrat : ajouter un domaine (sport, droit…) revient à
-créer un dossier dans agora/contexts/ qui expose un ContextSpec, sans toucher au cœur ni à l'interface.
+Le reste du code ne connaît les contextes qu'à travers ce contrat : ajouter un domaine (sport, droit…) revient
+à créer un dossier dans agora/contexts/ qui expose un ContextSpec, et à l'inscrire dans le registre.
 """
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any
 
 MOIS = (
     "janvier",
@@ -37,45 +35,38 @@ def _fr(value) -> str:
 
 
 @dataclass(frozen=True)
-class Source:
-    """Une référence citable, affichée comme carte cliquable dans l'interface."""
+class Identity:
+    """Comment le contexte se présente au client MCP."""
 
-    kind: str  # identifiant libre propre au contexte : "film", "seance"…
-    title: str
-    subtitle: str
-    url: str | None
-    excerpt: str
-    score: float | None = None
+    place: str  # nom du contexte : « La Salle obscure »
+    description: str
+    corpus_label: str  # « 35 000 films », « 601 séances »
 
 
 @dataclass(frozen=True)
-class Identity:
-    """Ce que l'interface affiche : nom du lieu, de l'agent, accroche, thème visuel."""
+class DataSource:
+    """Provenance d'un corpus et licence sous laquelle il est réutilisé : ce qu'il faut citer pour s'y conformer."""
 
-    place: str  # nom du lieu : « La Salle obscure »
-    agent: str  # nom de l'agent : « Lumière »
-    tagline: str
-    description: str
-    theme: str  # clé du thème CSS côté front
-    emblem: str  # clé de l'emblème SVG côté front
-    corpus_label: str  # « 35 000 films », « 601 séances »
+    name: str
+    url: str
+    producer: str  # à qui revient la paternité de l'information
+    license: str
+    license_url: str
 
 
 @dataclass(frozen=True)
 class ContextSpec:
     id: str
     identity: Identity
-    system_prompt: str
-    server_module: str  # module Python du serveur MCP (lancé en stdio)
+    server_module: str  # module Python du serveur MCP
     collections: tuple[str, ...]  # tables de la base indexée
+    sources: tuple[DataSource, ...]
     suggestions: tuple[str, ...]
     tool_labels: dict[str, str] = field(default_factory=dict)  # nom d'outil → libellé lisible
     # Colonne dont les bornes (min, max) décrivent l'étendue des archives, et le gabarit qui les affiche.
-    # Les archives ont une date de fin : l'interface et le prompt système doivent la connaître.
+    # Les archives ont une date de fin : le client MCP doit la connaître pour ne pas conclure au silence.
     coverage_column: str | None = None
     coverage_label: str = "de {min} à {max}"
-    # Transforme le résultat brut d'un outil MCP en sources citables.
-    to_sources: Callable[[str, Any], list[Source]] = lambda tool, payload: []
 
     def coverage_text(self, bounds: tuple | None) -> str | None:
         """Étendue lisible (« séances du 18 juillet 2024 au 26 septembre 2026 ») à partir des bornes de l'index."""

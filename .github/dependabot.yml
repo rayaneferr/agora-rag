@@ -1,4 +1,4 @@
-# Mises à jour groupées, une fois par semaine, pour les trois écosystèmes du dépôt.
+# Mises à jour groupées, une fois par semaine, pour les deux écosystèmes du dépôt.
 version: 2
 updates:
   - package-ecosystem: uv
@@ -7,13 +7,6 @@ updates:
       interval: weekly
     groups:
       python:
-        patterns: ["*"]
-  - package-ecosystem: npm
-    directory: /web
-    schedule:
-      interval: weekly
-    groups:
-      web:
         patterns: ["*"]
   - package-ecosystem: github-actions
     directory: /

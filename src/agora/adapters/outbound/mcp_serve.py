@@ -3,6 +3,7 @@
 import argparse
 import ipaddress
 import os
+from dataclasses import asdict
 
 from mcp.server.mcpserver import MCPServer
 
@@ -22,24 +23,27 @@ def coverage(spec: ContextSpec) -> str | None:
 
 
 def archives(spec: ContextSpec) -> dict:
-    """Contenu de la resource `<contexte>://archives` : ce que couvre la base et comment l'interroger."""
+    """Contenu de la resource `<contexte>://archives` : ce que couvre la base, d'où elle vient, comment l'interroger.
+
+    La provenance et la licence voyagent avec les données : un client qui réutilise les extraits sait qui citer.
+    """
     return {
         "lieu": spec.identity.place,
-        "guide": spec.identity.agent,
         "description": spec.identity.description,
         "corpus": spec.identity.corpus_label,
         "etendue": coverage(spec),
         "extraits_indexes": sum(vs.count(c) for c in spec.collections),
         "outils": spec.tool_labels,
         "exemples": list(spec.suggestions),
+        "sources": [asdict(source) for source in spec.sources],
     }
 
 
 def guided_prompt(spec: ContextSpec, task: str, steps: list[str], rules: list[str]) -> str:
     """Prompt MCP prêt à l'emploi : la demande, l'étendue des archives, la marche à suivre et les règles.
 
-    Il est lu par l'assistant de l'utilisateur (Claude, ChatGPT…), pas par nos agents : on y rappelle les
-    exigences de sourçage, car c'est le seul moyen de les transmettre à un modèle qu'on ne contrôle pas.
+    Il est lu par l'assistant de l'utilisateur (Claude, ChatGPT…) : on y rappelle les exigences de sourçage, car
+    c'est le seul moyen de les transmettre à un modèle qu'on ne contrôle pas.
     """
     scope = spec.identity.corpus_label + (f", {cov}" if (cov := coverage(spec)) else "")
     lines = [task, "", f"Archives interrogées : {scope}.", "", "Marche à suivre :"]
