@@ -2,12 +2,15 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Source } from "../api";
-import { type AssistantMessage, type Message, type Step, TOOL_LABELS, formatCost, formatMs } from "../conversation";
+import { type AssistantMessage, type Message, type Step, formatMs } from "../conversation";
+import { Emblem } from "./Emblem";
 import { Mascot } from "./Mascot";
+
+const SOURCE_KIND: Record<string, string> = { film: "Film", seance: "Séance" };
 
 const STATUS_TEXT: Record<AssistantMessage["status"], string> = {
   thinking: "Réfléchit…",
-  tool: "Consulte les archives…",
+  tool: "Fouille les archives…",
   writing: "Rédige…",
   done: "",
   error: "",
@@ -33,8 +36,8 @@ function StepView({ step }: { step: Step }) {
       </span>
       <div className="tool-step__body">
         <div className="tool-step__title">
-          {TOOL_LABELS[step.name] ?? step.name}
-          {step.server && <span className="badge">{step.server}</span>}
+          {step.label}
+          <code className="badge">{step.name}</code>
         </div>
         {main && <div className="tool-step__query">« {main} »</div>}
         {filters.length > 0 && (
@@ -89,7 +92,7 @@ function Sources({ sources }: { sources: Source[] }) {
       <div className="sources__grid">
         {shown.map((s, i) => (
           <a key={i} className={`source source--${s.kind}`} href={s.url ?? undefined} target="_blank" rel="noreferrer">
-            <span className="source__kind">{s.kind === "film" ? "Film" : "Séance"}</span>
+            <span className="source__kind">{SOURCE_KIND[s.kind] ?? s.kind}</span>
             <span className="source__title">{s.title}</span>
             <span className="source__subtitle">{s.subtitle}</span>
             {s.excerpt && <span className="source__excerpt">{s.excerpt}</span>}
@@ -115,12 +118,12 @@ function StatsLine({ msg }: { msg: AssistantMessage }) {
       <span>
         {(s.prompt_tokens + s.completion_tokens).toLocaleString("fr-FR")} tokens
       </span>
-      <span>{s.cost_usd ? formatCost(s.cost_usd) : "gratuit"}</span>
+      <span>local · gratuit</span>
     </div>
   );
 }
 
-export function MessageView({ msg }: { msg: Message }) {
+export function MessageView({ msg, emblem }: { msg: Message; emblem: string }) {
   if (msg.role === "user") {
     return (
       <div className="msg msg--user">
@@ -132,7 +135,10 @@ export function MessageView({ msg }: { msg: Message }) {
   return (
     <div className="msg msg--assistant">
       <div className="msg__avatar">
-        <Mascot size={34} mood={msg.status === "error" ? "error" : busy ? "busy" : "idle"} />
+        <Mascot size={38} mood={msg.status === "error" ? "error" : busy ? "busy" : "idle"} />
+        <span className="msg__emblem">
+          <Emblem name={emblem} size={16} />
+        </span>
       </div>
       <div className="msg__body">
         <Activity msg={msg} />

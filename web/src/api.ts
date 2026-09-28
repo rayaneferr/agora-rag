@@ -1,27 +1,35 @@
-// Contrat avec l'API Python (src/agora/api.py). Les événements SSE sont émis par agent.run_turn.
+// Contrat avec l'API Python (src/agora/adapters/inbound/api.py). Événements SSE : core/agent.run_turn.
 
 export interface Provider {
   id: string;
   name: string;
-  key_url: string;
-  key_hint: string;
-  available: boolean;
   note: string;
-  needs_key: boolean;
+  install_url: string;
 }
 
 export interface Model {
   id: string;
   label: string;
+  size: string;
 }
 
-export interface Health {
-  index: { status: "ready" | "downloading" | "error" | "unknown"; error: string | null; points: Record<string, number | null> };
-  tools: { name: string; server: string }[];
+/** Un contexte délimité : base indexée + serveur MCP + identité. */
+export interface ContextInfo {
+  id: string;
+  place: string;
+  agent: string;
+  tagline: string;
+  description: string;
+  theme: string;
+  emblem: string;
+  corpus_label: string;
+  suggestions: string[];
+  tools: { name: string; label: string }[];
+  points: number;
 }
 
 export interface Source {
-  kind: "film" | "debat";
+  kind: string;
   title: string;
   subtitle: string;
   url: string | null;
@@ -43,7 +51,7 @@ export interface Stats {
 export type ChatEvent =
   | { type: "thinking"; round: number }
   | { type: "token"; text: string }
-  | { type: "tool_call"; id: string; name: string; server: string | null; args: Record<string, unknown> }
+  | { type: "tool_call"; id: string; name: string; label: string; args: Record<string, unknown> }
   | {
       type: "tool_result";
       id: string;
@@ -65,20 +73,17 @@ async function json<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export const getHealth = () => fetch("/api/health").then((r) => json<Health>(r));
 export const getProviders = () => fetch("/api/providers").then((r) => json<Provider[]>(r));
-
-export const getModels = (provider: string, apiKey: string) =>
-  fetch("/api/models", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ provider, api_key: apiKey }),
-  }).then((r) => json<{ models: Model[]; default: string | null }>(r));
+export const getContexts = () => fetch("/api/contexts").then((r) => json<ContextInfo[]>(r));
+export const getModels = (provider: string) =>
+  fetch(`/api/models?provider=${encodeURIComponent(provider)}`).then((r) =>
+    json<{ models: Model[]; default: string | null }>(r),
+  );
 
 export interface ChatRequest {
+  context: string;
   provider: string;
   model: string;
-  api_key: string;
   message: string;
   history: { role: "user" | "assistant"; content: string }[];
 }

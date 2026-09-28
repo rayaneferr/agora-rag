@@ -4,7 +4,7 @@ export interface ToolStep {
   kind: "tool";
   id: string;
   name: string;
-  server: string | null;
+  label: string;
   args: Record<string, unknown>;
   status: "running" | "ok" | "error";
   durationMs?: number;
@@ -48,14 +48,6 @@ export interface LogEntry {
   detail?: string;
 }
 
-export const TOOL_LABELS: Record<string, string> = {
-  search_films: "Recherche de films",
-  get_film: "Lecture d'une fiche film",
-  find_orateurs: "Identification de l'orateur",
-  search_debats: "Recherche dans les débats",
-  get_contexte: "Lecture du contexte de la séance",
-};
-
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
 export function newAssistant(): AssistantMessage {
@@ -86,10 +78,10 @@ export function applyEvent(msg: AssistantMessage, ev: ChatEvent): { msg: Assista
     case "tool_call": {
       // Le texte écrit avant l'appel d'outil n'est pas la réponse : on le range comme note.
       const steps: Step[] = msg.content.trim() ? [...msg.steps, { kind: "note", text: msg.content.trim() }] : [...msg.steps];
-      steps.push({ kind: "tool", id: ev.id, name: ev.name, server: ev.server, args: ev.args, status: "running" });
+      steps.push({ kind: "tool", id: ev.id, name: ev.name, label: ev.label, args: ev.args, status: "running" });
       return {
         msg: { ...msg, status: "tool", content: "", steps },
-        log: { at, level: "tool", text: `→ ${ev.server ?? "?"} · ${ev.name}`, detail: JSON.stringify(ev.args) },
+        log: { at, level: "tool", text: `→ MCP · ${ev.name}`, detail: JSON.stringify(ev.args) },
       };
     }
     case "tool_result": {
@@ -111,7 +103,7 @@ export function applyEvent(msg: AssistantMessage, ev: ChatEvent): { msg: Assista
         log: {
           at,
           level: "ok",
-          text: `Réponse · ${(ev.stats.total_ms / 1000).toFixed(1)} s · ${ev.stats.prompt_tokens + ev.stats.completion_tokens} tokens · ${formatCost(ev.stats.cost_usd)}`,
+          text: `Réponse · ${(ev.stats.total_ms / 1000).toFixed(1)} s · ${ev.stats.prompt_tokens + ev.stats.completion_tokens} tokens`,
         },
       };
     case "error":
@@ -120,11 +112,6 @@ export function applyEvent(msg: AssistantMessage, ev: ChatEvent): { msg: Assista
         log: { at, level: "error", text: `Erreur (${ev.kind})`, detail: ev.message },
       };
   }
-}
-
-export function formatCost(usd: number): string {
-  if (!usd) return "0 $";
-  return usd < 0.01 ? `${(usd * 100).toFixed(3).replace(".", ",")} ¢` : `${usd.toFixed(3).replace(".", ",")} $`;
 }
 
 export function formatMs(ms: number): string {
