@@ -3,10 +3,12 @@ branché sur les serveurs MCP « cinema » et « assemblee ».
 
 uv run agora-chat --model anthropic/claude-sonnet-5
 uv run agora-chat --model openai/gpt-5.4-mini
+uv run agora-chat --model openai/gpt-5.4-mini --mcp-url http://localhost:8101/mcp --mcp-url http://localhost:8102/mcp
 """
 
 import argparse
 import asyncio
+import contextlib
 import getpass
 import json
 import os
@@ -14,7 +16,7 @@ import sys
 import time
 
 import litellm
-from mcp.client.session_group import ClientSessionGroup
+from mcp.client.session_group import ClientSessionGroup, StreamableHttpParameters
 from mcp.client.stdio import StdioServerParameters
 
 from agora.common import ROOT
@@ -37,6 +39,13 @@ def resolve_api_key(model: str, cli_key: str | None) -> str | None:
     if not missing:
         return None  # LiteLLM trouvera la clé tout seul dans l'environnement
     return getpass.getpass(f"Clé API pour {model} ({', '.join(missing)}) : ").strip()
+
+
+def server_params(urls: list[str] | None) -> list[StdioServerParameters | StreamableHttpParameters]:
+    """URLs fournies : serveurs HTTP déjà lancés. Sinon : on lance les serveurs en sous-processus stdio."""
+    if urls:
+        return [StreamableHttpParameters(url=u) for u in urls]
+    return [StdioServerParameters(command=sys.executable, args=["-m", m], cwd=str(ROOT)) for m in SERVERS]
 
 
 def to_openai_tools(group: ClientSessionGroup) -> list[dict]:
@@ -64,10 +73,8 @@ async def answer(group, tools, messages, model, api_key) -> dict:
         stats["latency_s"] += time.perf_counter() - t0
         stats["prompt_tokens"] += resp.usage.prompt_tokens
         stats["completion_tokens"] += resp.usage.completion_tokens
-        try:
+        with contextlib.suppress(Exception):  # modèle absent de la grille de prix LiteLLM
             stats["cost_usd"] += litellm.completion_cost(resp)
-        except Exception:
-            pass  # modèle absent de la grille de prix LiteLLM
 
         msg = resp.choices[0].message
         messages.append(msg.model_dump(exclude_none=True))
@@ -87,12 +94,10 @@ async def answer(group, tools, messages, model, api_key) -> dict:
     return stats
 
 
-async def run(model: str, api_key: str | None) -> None:
+async def run(model: str, api_key: str | None, mcp_urls: list[str] | None) -> None:
     async with ClientSessionGroup() as group:
-        for module in SERVERS:
-            await group.connect_to_server(
-                StdioServerParameters(command=sys.executable, args=["-m", module], cwd=str(ROOT))
-            )
+        for params in server_params(mcp_urls):
+            await group.connect_to_server(params)
         tools = to_openai_tools(group)
         print(f"Modèle : {model} — outils MCP : {', '.join(group.tools)}")
         print("Pose ta question (Ctrl-D pour quitter).\n")
@@ -118,11 +123,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", default=os.getenv("LLM_MODEL"), help="Modèle au format LiteLLM (provider/modele)")
     parser.add_argument("--api-key", help="Clé API (sinon variable d'env ou saisie)")
+    parser.add_argument(
+        "--mcp-url",
+        action="append",
+        default=[u for u in os.getenv("MCP_URLS", "").split(",") if u],
+        help="URL d'un serveur MCP HTTP (répétable ; sinon MCP_URLS, sinon lancement stdio local)",
+    )
     args = parser.parse_args()
     if not args.model:
         parser.error("précise --model (ou LLM_MODEL dans .env)")
     litellm.suppress_debug_info = True
-    asyncio.run(run(args.model, resolve_api_key(args.model, args.api_key)))
+    asyncio.run(run(args.model, resolve_api_key(args.model, args.api_key), args.mcp_url))
 
 
 if __name__ == "__main__":

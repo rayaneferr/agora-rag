@@ -65,7 +65,23 @@ def qdrant() -> QdrantClient:
     return QdrantClient(url=QDRANT_URL)
 
 
-def chunk_text(text: str, max_chars: int = 1500, overlap: int = 200) -> list[str]:
+CHUNK_OVERLAP = 200
+
+
+def join_chunks(chunks: list[str], overlap: int = CHUNK_OVERLAP) -> str:
+    """Inverse de chunk_text : recolle les chunks sans dupliquer le recouvrement des fenêtres glissantes."""
+    if not chunks:
+        return ""
+    out = chunks[0]
+    for prev, cur in zip(chunks, chunks[1:], strict=False):
+        if len(prev) >= overlap and cur[:overlap] == prev[-overlap:]:
+            out += cur[overlap:]  # fenêtre glissante : suite directe du même paragraphe
+        else:
+            out += "\n" + cur
+    return out
+
+
+def chunk_text(text: str, max_chars: int = 1500, overlap: int = CHUNK_OVERLAP) -> list[str]:
     """Découpe sur les paragraphes puis, si besoin, en fenêtres glissantes."""
     text = text.strip()
     if len(text) <= max_chars:

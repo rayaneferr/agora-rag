@@ -1,9 +1,10 @@
 """Serveur MCP « cinema » : RAG sur les synopsis Wikipedia (~35k films)."""
 
+from mcp.server.mcpserver import MCPServer
 from qdrant_client import models
 
-from mcp.server.mcpserver import MCPServer
-from agora.common import COLLECTION_FILMS, embed, qdrant, warm_up
+from agora.common import COLLECTION_FILMS, embed, join_chunks, qdrant
+from agora.servers._run import serve
 
 mcp = MCPServer(
     "cinema",
@@ -44,15 +45,19 @@ def search_films(
         must.append(models.FieldCondition(key="year", range=models.Range(gte=year_min, lte=year_max)))
 
     # Plusieurs chunks d'un même film peuvent matcher : on groupe par film_id.
-    groups = qdrant().query_points_groups(
-        COLLECTION_FILMS,
-        query=embed([query])[0],
-        group_by="film_id",
-        limit=max(1, min(limit, 20)),
-        group_size=1,
-        query_filter=models.Filter(must=must) if must else None,
-        with_payload=True,
-    ).groups
+    groups = (
+        qdrant()
+        .query_points_groups(
+            COLLECTION_FILMS,
+            query=embed([query])[0],
+            group_by="film_id",
+            limit=max(1, min(limit, 20)),
+            group_size=1,
+            query_filter=models.Filter(must=must) if must else None,
+            with_payload=True,
+        )
+        .groups
+    )
     results = []
     for g in groups:
         hit = g.hits[0]
@@ -79,7 +84,9 @@ def get_film(film_id: int) -> dict:
     """Retourne la fiche complète d'un film (synopsis intégral), à partir du film_id de search_films."""
     points, _ = qdrant().scroll(
         COLLECTION_FILMS,
-        scroll_filter=models.Filter(must=[models.FieldCondition(key="film_id", match=models.MatchValue(value=film_id))]),
+        scroll_filter=models.Filter(
+            must=[models.FieldCondition(key="film_id", match=models.MatchValue(value=film_id))]
+        ),
         limit=100,
         with_payload=True,
     )
@@ -87,13 +94,12 @@ def get_film(film_id: int) -> dict:
         return {"error": f"film_id {film_id} introuvable"}
     chunks = sorted((p.payload for p in points), key=lambda p: p["chunk_index"])
     fiche = {k: v for k, v in chunks[0].items() if k not in {"text", "chunk_index"}}
-    fiche["plot"] = "\n".join(c["text"] for c in chunks)
+    fiche["plot"] = join_chunks([c["text"] for c in chunks])
     return fiche
 
 
 def main() -> None:
-    warm_up()
-    mcp.run("stdio")
+    serve(mcp, default_port=8101)
 
 
 if __name__ == "__main__":

@@ -4,10 +4,11 @@ import unicodedata
 from datetime import date
 from functools import lru_cache
 
+from mcp.server.mcpserver import MCPServer
 from qdrant_client import models
 
-from mcp.server.mcpserver import MCPServer
-from agora.common import COLLECTION_DEBATS, embed, qdrant, warm_up
+from agora.common import COLLECTION_DEBATS, embed, join_chunks, qdrant
+from agora.servers._run import serve
 
 mcp = MCPServer(
     "assemblee",
@@ -89,13 +90,17 @@ def search_debats(
         must.append(
             models.FieldCondition(key="date_int", range=models.Range(gte=_date_int(date_min), lte=_date_int(date_max)))
         )
-    hits = qdrant().query_points(
-        COLLECTION_DEBATS,
-        query=embed([query])[0],
-        limit=max(1, min(limit, 20)),
-        query_filter=models.Filter(must=must) if must else None,
-        with_payload=True,
-    ).points
+    hits = (
+        qdrant()
+        .query_points(
+            COLLECTION_DEBATS,
+            query=embed([query])[0],
+            limit=max(1, min(limit, 20)),
+            query_filter=models.Filter(must=must) if must else None,
+            with_payload=True,
+        )
+        .points
+    )
     return [_format(h.payload, h.score) for h in hits]
 
 
@@ -123,20 +128,16 @@ def get_contexte(seance_uid: str, ordre: int, avant: int = 3, apres: int = 3) ->
         with_payload=True,
     )
     # Recolle les chunks d'une même intervention.
-    by_ordre: dict[int, dict] = {}
+    by_ordre: dict[int, list[dict]] = {}
     for p in sorted((p.payload for p in points), key=lambda p: (p["ordre"], p["chunk_index"])):
-        if p["ordre"] in by_ordre:
-            by_ordre[p["ordre"]]["text"] += "\n" + p["text"]
-        else:
-            by_ordre[p["ordre"]] = dict(p)
-    rows = list(by_ordre.values())
+        by_ordre.setdefault(p["ordre"], []).append(p)
+    rows = [{**chunks[0], "text": join_chunks([c["text"] for c in chunks])} for chunks in by_ordre.values()]
     idx = next((i for i, p in enumerate(rows) if p["ordre"] >= ordre), len(rows))
     return [_format(p) for p in rows[max(0, idx - avant) : idx + apres + 1]]
 
 
 def main() -> None:
-    warm_up()
-    mcp.run("stdio")
+    serve(mcp, default_port=8102)
 
 
 if __name__ == "__main__":
