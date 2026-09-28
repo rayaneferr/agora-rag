@@ -7,13 +7,51 @@ from pathlib import Path
 
 import polars as pl
 import pytest
+from mcp import Client
 
 from agora.adapters.outbound import vectorstore as vs
+from agora.adapters.outbound.mcp import decode
 from agora.contexts.assemblee import ingestion as ing_an
 from agora.contexts.assemblee import server as srv_an
+from agora.contexts.assemblee.server import mcp as mcp_assemblee
 from agora.contexts.cinema import ingestion as ing_cinema
+from agora.contexts.cinema.server import mcp as mcp_cinema
 
 DIM = 256
+SERVERS = {"cinema": mcp_cinema, "assemblee": mcp_assemblee}
+
+
+class InMemoryGateway:
+    """Implémente ToolGateway sur un client MCP en mémoire : le cœur ne voit pas la différence."""
+
+    def __init__(self, server):
+        self._server = server
+
+    async def __aenter__(self):
+        self._cm = Client(self._server)
+        self._client = await self._cm.__aenter__()
+        self._tools = (await self._client.list_tools()).tools
+        return self
+
+    async def __aexit__(self, *exc):
+        await self._cm.__aexit__(*exc)
+
+    @property
+    def tool_names(self):
+        return [t.name for t in self._tools]
+
+    def tool_schemas(self):
+        return [
+            {
+                "type": "function",
+                "function": {"name": t.name, "description": t.description, "parameters": t.input_schema},
+            }
+            for t in self._tools
+        ]
+
+    async def call(self, name, args):
+        result = await self._client.call_tool(name, args)
+        return not result.is_error, decode(result)
 
 
 def fake_embed(texts: list[str]) -> list[list[float]]:

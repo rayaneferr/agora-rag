@@ -1,47 +1,26 @@
 """Boucle agent de bout en bout : LLM de démo + vrai serveur MCP du contexte (en mémoire)."""
 
 import pytest
-from mcp import Client
+from conftest import SERVERS, InMemoryGateway
 
 from agora.adapters.outbound import llm
-from agora.adapters.outbound.mcp import decode
 from agora.contexts import CONTEXTS
 from agora.contexts.assemblee import to_sources as sources_an
-from agora.contexts.assemblee.server import mcp as mcp_assemblee
 from agora.contexts.cinema import to_sources as sources_cinema
 from agora.contexts.cinema.server import mcp as mcp_cinema
-from agora.core.agent import Turn, run_turn, scrub
+from agora.core.agent import LLMError, Turn, run_turn, system_prompt
 
-SERVERS = {"cinema": mcp_cinema, "assemblee": mcp_assemblee}
+CINEMA = CONTEXTS["cinema"]
 
 
-class InMemoryGateway:
-    """Implémente ToolGateway sur un client MCP en mémoire : le cœur ne voit pas la différence."""
-
-    def __init__(self, server):
-        self._server = server
-
-    async def __aenter__(self):
-        self._cm = Client(self._server)
-        self._client = await self._cm.__aenter__()
-        self._tools = (await self._client.list_tools()).tools
-        return self
-
-    async def __aexit__(self, *exc):
-        await self._cm.__aexit__(*exc)
+class _SansRecherche:
+    """Passerelle sans outil de recherche : le mode démo ne doit pas appeler un outil « None »."""
 
     def tool_schemas(self):
-        return [
-            {
-                "type": "function",
-                "function": {"name": t.name, "description": t.description, "parameters": t.input_schema},
-            }
-            for t in self._tools
-        ]
+        return [{"type": "function", "function": {"name": "get_film", "parameters": {}}}]
 
     async def call(self, name, args):
-        result = await self._client.call_tool(name, args)
-        return not result.is_error, decode(result)
+        raise AssertionError("aucun outil ne devrait être appelé")
 
 
 async def collect(context: str, message: str, model=None) -> list[dict]:
@@ -95,9 +74,29 @@ def test_prompt_systeme_propre_au_contexte():
     assert "Huissier" in CONTEXTS["assemblee"].system_prompt
 
 
-def test_scrub_masque_les_cles():
-    assert "sk-abcdefghijkl" not in scrub("Incorrect API key provided: sk-abcdefghijkl")
-    assert scrub("clé=secret123", "secret123") == "clé=sk-***"
+def test_prompt_systeme_annonce_l_etendue_des_archives():
+    prompt = system_prompt(CONTEXTS["assemblee"], "séances du 18 juillet 2024 au 26 septembre 2026")
+    assert "Étendue des archives : séances du 18 juillet 2024 au 26 septembre 2026." in prompt
+    assert "Règles communes" in prompt
+    assert "Étendue" not in system_prompt(CONTEXTS["assemblee"])
+
+
+async def test_flux_coupe_avant_le_message_final():
+    def llm_muet():
+        async def stream(messages, tools):
+            yield {"token": "Je commence…"}
+
+        return stream
+
+    with pytest.raises(LLMError) as exc:
+        async for _ in run_turn(CINEMA, llm_muet(), _SansRecherche(), Turn("?")):
+            pass
+    assert exc.value.kind == "stream"
+
+
+async def test_demo_sans_outil_de_recherche_repond_quand_meme():
+    events = [ev async for ev in run_turn(CINEMA, llm.demo(), _SansRecherche(), Turn("?"))]
+    assert events[-1]["type"] == "done"
 
 
 def test_sources_ignorent_erreurs_et_resultats_non_citables():

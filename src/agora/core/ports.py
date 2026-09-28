@@ -8,7 +8,7 @@ class LLMPort(Protocol):
     """Un appel au modèle, en streaming.
 
     Émet {"token": str} au fil de l'eau, puis un dernier
-    {"final": message_openai, "usage": {"prompt_tokens", "completion_tokens"} | None, "cost": float}.
+    {"final": message_openai, "usage": {"prompt_tokens", "completion_tokens"} | None}.
     """
 
     def __call__(self, messages: list[dict], tools: list[dict]) -> AsyncIterator[dict]: ...

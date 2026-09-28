@@ -10,8 +10,6 @@ import asyncio
 import json
 import sys
 
-import litellm
-
 from agora.adapters.outbound import llm
 from agora.adapters.outbound.mcp import McpGateway
 from agora.contexts import CONTEXTS
@@ -63,7 +61,6 @@ def main() -> None:
     parser.add_argument("--model", default=llm.PREFERRED[0], help="Modèle Ollama (défaut : %(default)s)")
     parser.add_argument("--mcp-url", help="Serveur MCP HTTP déjà lancé (sinon lancement stdio local)")
     args = parser.parse_args()
-    litellm.suppress_debug_info = True
     asyncio.run(run(args.context, args.model, args.mcp_url))
 
 

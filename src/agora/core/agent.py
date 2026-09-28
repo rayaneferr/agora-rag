@@ -6,7 +6,6 @@ d'infrastructure : le modèle et les outils arrivent par les ports.
 """
 
 import json
-import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass, field
@@ -22,6 +21,8 @@ Règles communes :
 - N'ajoute pas de filtre que l'utilisateur n'a pas demandé. Si une recherche filtrée ne renvoie rien,
   relance-la avec moins de filtres avant de conclure.
 - Cite tes sources. Si les outils ne trouvent rien, dis-le au lieu d'inventer.
+- Les archives s'arrêtent à une date donnée : si une question porte sur une période postérieure, dis-le
+  plutôt que de conclure que rien ne s'est passé.
 - Réponds en français, de façon claire et structurée (Markdown)."""
 
 
@@ -41,21 +42,27 @@ class LLMError(Exception):
         self.kind = kind
 
 
-def scrub(text: str, secret: str | None = None) -> str:
-    """Une clé ne doit jamais ressortir dans un message d'erreur ou un log."""
-    if secret:
-        text = text.replace(secret, "sk-***")
-    return re.sub(r"sk-[A-Za-z0-9_\-]{8,}", "sk-***", text)
+def system_prompt(context: ContextSpec, coverage: str | None = None) -> str:
+    """Prompt système complet : identité du contexte, étendue des archives, règles communes."""
+    parts = [context.system_prompt.strip()]
+    if coverage:
+        parts.append(f"Étendue des archives : {coverage}.")
+    parts.append(COMMON_RULES.strip())
+    return "\n".join(parts)
 
 
-async def run_turn(context: ContextSpec, llm: LLMPort, tools: ToolGateway, turn: Turn) -> AsyncIterator[dict]:
+async def run_turn(
+    context: ContextSpec, llm: LLMPort, tools: ToolGateway, turn: Turn, coverage: str | None = None
+) -> AsyncIterator[dict]:
     """Répond à un message ; émet les événements affichés par l'interface (et par la CLI)."""
     t_start = time.perf_counter()
     schemas = tools.tool_schemas()
-    system = context.system_prompt.strip() + "\n" + COMMON_RULES
-    messages = [{"role": "system", "content": system}, *turn.history, {"role": "user", "content": turn.message}]
-    stats = {"llm_calls": 0, "tool_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0}
-    stats |= {"llm_ms": 0, "tool_ms": 0}
+    messages = [
+        {"role": "system", "content": system_prompt(context, coverage)},
+        *turn.history,
+        {"role": "user", "content": turn.message},
+    ]
+    stats = {"llm_calls": 0, "tool_calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "llm_ms": 0, "tool_ms": 0}
 
     for round_ in range(1, MAX_TOOL_ROUNDS + 1):
         yield {"type": "thinking", "round": round_}
@@ -68,10 +75,11 @@ async def run_turn(context: ContextSpec, llm: LLMPort, tools: ToolGateway, turn:
                 final = ev
         stats["llm_ms"] += int((time.perf_counter() - t0) * 1000)
         stats["llm_calls"] += 1
+        if final is None:  # flux coupé avant le message final
+            raise LLMError("stream", "Le modèle a interrompu sa réponse avant la fin.")
         if usage := final.get("usage"):
             stats["prompt_tokens"] += usage.get("prompt_tokens") or 0
             stats["completion_tokens"] += usage.get("completion_tokens") or 0
-        stats["cost_usd"] += final.get("cost") or 0.0
 
         msg = final["final"]
         messages.append(msg)
