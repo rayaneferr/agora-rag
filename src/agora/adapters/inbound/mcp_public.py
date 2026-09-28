@@ -91,6 +91,7 @@ def create_app(
     rate_limit: int = 60,
     forwarded_hops: int = 0,
     warm_up=vs.warm_up,
+    embedder_loaded=vs.embedder_loaded,
 ):
     """Une app ASGI : /<contexte>/mcp pour chaque contexte du registre, / et /health pour l'état du service."""
     hosts = list(allowed_hosts or [])
@@ -127,17 +128,22 @@ def create_app(
                 "etendue": coverage(spec),
                 "extraits_indexes": indexed,
             }
-        ready = all(c["extraits_indexes"] > 0 for c in contexts.values())
+        # 503 tant que le service ne peut pas répondre vite : index absent, ou bge-m3 encore en chargement.
+        if not all(c["extraits_indexes"] > 0 for c in contexts.values()):
+            status = "degraded"
+        else:
+            status = "ok" if embedder_loaded() else "starting"
         return JSONResponse(
             {
                 "name": "agora-mcp",
-                "status": "ok" if ready else "degraded",
+                "status": status,
+                "embedder": "ready" if embedder_loaded() else "loading",
                 "transport": "streamable-http",
                 "description": "Serveurs MCP d'Agora : RAG sur des synopsis de films et les débats de l'Assemblée "
                 "nationale. Public, en lecture seule, sans authentification.",
                 "contexts": contexts,
             },
-            status_code=200 if ready else 503,
+            status_code=200 if status == "ok" else 503,
         )
 
     @asynccontextmanager
