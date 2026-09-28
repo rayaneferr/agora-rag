@@ -6,7 +6,34 @@ créer un dossier dans agora/contexts/ qui expose un ContextSpec, sans toucher a
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
+
+MOIS = (
+    "janvier",
+    "février",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "août",
+    "septembre",
+    "octobre",
+    "novembre",
+    "décembre",
+)
+
+
+def _fr(value) -> str:
+    """Une borne lisible : « 18 juillet 2024 » pour une date ISO, la valeur brute sinon."""
+    if isinstance(value, str) and len(value) == 10 and value[4] == "-":
+        try:
+            d = date.fromisoformat(value)
+            return f"{d.day} {MOIS[d.month - 1]} {d.year}"
+        except ValueError:
+            return value
+    return str(value)
 
 
 @dataclass(frozen=True)
@@ -49,3 +76,9 @@ class ContextSpec:
     coverage_label: str = "de {min} à {max}"
     # Transforme le résultat brut d'un outil MCP en sources citables.
     to_sources: Callable[[str, Any], list[Source]] = lambda tool, payload: []
+
+    def coverage_text(self, bounds: tuple | None) -> str | None:
+        """Étendue lisible (« séances du 18 juillet 2024 au 26 septembre 2026 ») à partir des bornes de l'index."""
+        if bounds is None:
+            return None
+        return self.coverage_label.format(min=_fr(bounds[0]), max=_fr(bounds[1]))

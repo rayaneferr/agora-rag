@@ -1,4 +1,4 @@
-"""Point d'entrée commun aux serveurs MCP : stdio (lancé par un client) ou HTTP (service autonome)."""
+"""Ce que les serveurs MCP ont en commun : point d'entrée (stdio ou HTTP), description des archives, prompts guidés."""
 
 import argparse
 import ipaddress
@@ -6,7 +6,46 @@ import os
 
 from mcp.server.mcpserver import MCPServer
 
+from agora.adapters.outbound import vectorstore as vs
 from agora.adapters.outbound.vectorstore import warm_up
+from agora.core.context import ContextSpec
+
+
+def coverage(spec: ContextSpec) -> str | None:
+    """Étendue réelle des archives, lue dans l'index : le client MCP doit savoir où elles s'arrêtent."""
+    if not spec.coverage_column:
+        return None
+    try:
+        return spec.coverage_text(vs.bounds(spec.collections[0], spec.coverage_column))
+    except Exception:
+        return None  # index absent ou illisible : on décrit le reste sans l'étendue
+
+
+def archives(spec: ContextSpec) -> dict:
+    """Contenu de la resource `<contexte>://archives` : ce que couvre la base et comment l'interroger."""
+    return {
+        "lieu": spec.identity.place,
+        "guide": spec.identity.agent,
+        "description": spec.identity.description,
+        "corpus": spec.identity.corpus_label,
+        "etendue": coverage(spec),
+        "extraits_indexes": sum(vs.count(c) for c in spec.collections),
+        "outils": spec.tool_labels,
+        "exemples": list(spec.suggestions),
+    }
+
+
+def guided_prompt(spec: ContextSpec, task: str, steps: list[str], rules: list[str]) -> str:
+    """Prompt MCP prêt à l'emploi : la demande, l'étendue des archives, la marche à suivre et les règles.
+
+    Il est lu par l'assistant de l'utilisateur (Claude, ChatGPT…), pas par nos agents : on y rappelle les
+    exigences de sourçage, car c'est le seul moyen de les transmettre à un modèle qu'on ne contrôle pas.
+    """
+    scope = spec.identity.corpus_label + (f", {cov}" if (cov := coverage(spec)) else "")
+    lines = [task, "", f"Archives interrogées : {scope}.", "", "Marche à suivre :"]
+    lines += [f"{i}. {step}" for i, step in enumerate(steps, 1)]
+    lines += ["", "Règles :"] + [f"- {rule}" for rule in rules]
+    return "\n".join(lines)
 
 
 def is_loopback(host: str) -> bool:

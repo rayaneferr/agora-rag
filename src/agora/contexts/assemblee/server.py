@@ -8,8 +8,8 @@ from functools import lru_cache
 from mcp.server.mcpserver import MCPServer
 
 from agora.adapters.outbound import vectorstore as vs
-from agora.adapters.outbound.mcp_serve import serve
-from agora.contexts.assemblee import COLLECTION
+from agora.adapters.outbound.mcp_serve import archives, guided_prompt, serve
+from agora.contexts.assemblee import COLLECTION, SPEC
 from agora.core.text import join_chunks
 
 mcp = MCPServer(
@@ -122,6 +122,86 @@ def get_contexte(seance_uid: str, ordre: int, avant: int = 3, apres: int = 3) ->
     rows = [{**chunks[0], "text": join_chunks([c["text"] for c in chunks])} for chunks in by_ordre.values()]
     idx = next((i for i, p in enumerate(rows) if p["ordre"] >= ordre), len(rows))
     return [_format(p) for p in rows[max(0, idx - avant) : idx + apres + 1]]
+
+
+# Règles transmises à l'assistant de l'utilisateur par les prompts : c'est lui qui rédige la réponse.
+RULES = [
+    "Ne rapporte que ce qui figure dans les extraits renvoyés par les outils, jamais ce que tu crois savoir.",
+    "Pour chaque position : l'orateur (et son groupe s'il est indiqué), la date et le lien de la séance.",
+    "Distingue la citation, entre guillemets et mot pour mot du champ `texte`, du résumé.",
+    "Reste neutre : rapporte les positions sans les juger, et ne prête à personne ce qu'un autre a dit.",
+    "Si rien n'est trouvé, dis-le : ce n'est pas la preuve qu'un orateur n'a pas de position.",
+    "Les archives s'arrêtent à la date indiquée : ne conclus pas au silence sur une période postérieure.",
+]
+
+
+@mcp.resource(
+    "assemblee://archives",
+    title="Archives de L'Hémicycle",
+    description="Étendue des comptes rendus indexés, outils disponibles et exemples de questions.",
+    mime_type="application/json",
+)
+def archives_assemblee() -> dict:
+    return archives(SPEC)
+
+
+@mcp.prompt(
+    name="position-orateur",
+    title="Position d'un orateur sur un sujet",
+    description="Ce qu'un député ou un ministre a dit en séance sur un sujet, daté et sourcé.",
+)
+def position_orateur(orateur: str, sujet: str) -> str:
+    return guided_prompt(
+        SPEC,
+        f"Qu'a dit {orateur} en séance publique sur le sujet suivant : « {sujet} » ?",
+        [
+            f"Appelle find_orateurs avec « {orateur} » pour obtenir son nom exact (sans civilité).",
+            "Appelle search_debats avec ce sujet et le filtre orateur ; reformule et relance si c'est maigre.",
+            "Si un extrait répond à quelqu'un, appelle get_contexte pour situer l'échange.",
+            "Restitue ses positions dans l'ordre chronologique, avec une citation courte pour chacune.",
+        ],
+        RULES,
+    )
+
+
+@mcp.prompt(
+    name="debat-sur-un-sujet",
+    title="Le débat sur un sujet",
+    description="Les positions défendues en séance sur un sujet, orateur par orateur, sur une période optionnelle.",
+)
+def debat_sur_un_sujet(sujet: str, date_min: str | None = None, date_max: str | None = None) -> str:
+    period = " ".join(x for x in (date_min and f"à partir du {date_min}", date_max and f"jusqu'au {date_max}") if x)
+    return guided_prompt(
+        SPEC,
+        f"Quelles positions ont été défendues en séance publique sur « {sujet} »{f' ({period})' if period else ''} ?",
+        [
+            "Appelle search_debats avec ce sujet, sans filtre orateur"
+            + (f", avec date_min={date_min}" if date_min else "")
+            + (f", avec date_max={date_max}" if date_max else "")
+            + " ; relance avec deux ou trois reformulations pour couvrir les angles du débat.",
+            "Regroupe les extraits par orateur et par groupe politique quand il est indiqué.",
+            "Présente les positions en présence, puis les points d'accord et de désaccord qui ressortent des extraits.",
+        ],
+        RULES,
+    )
+
+
+@mcp.prompt(
+    name="qui-a-repondu",
+    title="Qui a répondu à qui",
+    description="Retrouve une intervention et le fil de l'échange qui l'entoure dans la séance.",
+)
+def qui_a_repondu(orateur: str, sujet: str) -> str:
+    return guided_prompt(
+        SPEC,
+        f"Retrouve l'intervention de {orateur} sur « {sujet} » et montre qui lui a répondu en séance.",
+        [
+            f"Appelle find_orateurs avec « {orateur} », puis search_debats avec le sujet et ce nom exact.",
+            "Sur l'extrait le plus pertinent, appelle get_contexte avec son seance_uid et son ordre.",
+            "Restitue l'échange dans l'ordre de la séance : qui parle, en une phrase chacun, avec la date et le lien.",
+        ],
+        RULES,
+    )
 
 
 def main() -> None:

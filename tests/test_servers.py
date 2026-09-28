@@ -93,3 +93,44 @@ async def test_filtres_echappes():
     assert await call(mcp_assemblee, "search_debats", query="budget", orateur="d'Artagnan") == []
     films = await call(mcp_cinema, "search_films", query="alien", director="scott", year_min=1970, year_max=1980)
     assert [f["title"] for f in films] == ["Alien"]
+
+
+async def prompt(server, name: str, **args) -> str:
+    async with Client(server) as client:
+        result = await client.get_prompt(name, args)
+    return result.messages[0].content.text
+
+
+async def test_prompts_exposes():
+    async with Client(mcp_cinema) as c:
+        names = {p.name for p in (await c.list_prompts()).prompts}
+        assert names == {"trouver-un-film", "recommander-des-films", "fiche-film"}
+    async with Client(mcp_assemblee) as c:
+        names = {p.name for p in (await c.list_prompts()).prompts}
+        assert names == {"position-orateur", "debat-sur-un-sujet", "qui-a-repondu"}
+
+
+async def test_prompt_guide_les_outils_et_donne_l_etendue():
+    text = await prompt(mcp_assemblee, "position-orateur", orateur="Dubois", sujet="l'école")
+    assert "find_orateurs" in text and "search_debats" in text
+    # L'étendue vient de l'index : le modèle de l'utilisateur sait où s'arrêtent les archives.
+    assert "séances du 6 novembre 2024 au 6 novembre 2024" in text
+    assert "Règles :" in text
+
+
+async def test_prompt_arguments_optionnels():
+    sans = await prompt(mcp_assemblee, "debat-sur-un-sujet", sujet="budget")
+    avec = await prompt(mcp_assemblee, "debat-sur-un-sujet", sujet="budget", date_min="2025-01-01")
+    assert "date_min" not in sans and "date_min=2025-01-01" in avec
+    films = await prompt(mcp_cinema, "recommander-des-films", envie="angoisse spatiale", genre="horror")
+    assert "genre=horror" in films and "year_min" not in films
+
+
+async def test_resource_archives():
+    async with Client(mcp_cinema) as client:
+        result = await client.read_resource("cinema://archives")
+    archives = json.loads(result.contents[0].text)
+    assert archives["guide"] == "Lumière"
+    assert archives["etendue"] == "films sortis de 1979 à 2010"
+    assert archives["extraits_indexes"] > 0
+    assert set(archives["outils"]) == {"search_films", "get_film"}
