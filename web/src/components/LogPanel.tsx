@@ -1,8 +1,10 @@
+import { Trash2, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { LogEntry } from "../conversation";
 
 const time = (at: number) => new Date(at).toLocaleTimeString("fr-FR", { hour12: false });
 
+/** Journal technique : appels au modèle et aux outils MCP, arguments et durées. */
 export function LogPanel({ logs, onClose, onClear }: { logs: LogEntry[]; onClose: () => void; onClear: () => void }) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -11,19 +13,18 @@ export function LogPanel({ logs, onClose, onClear }: { logs: LogEntry[]; onClose
     end.current?.scrollIntoView({ block: "end" });
   }, [logs.length]);
   return (
-    <aside className="logs" aria-label="Journal technique">
+    <aside className="logs" aria-label="Journal">
       <header className="logs__head">
-        <strong>Journal</strong>
-        <span className="muted">{logs.length} événements</span>
-        <button type="button" className="ghost small" onClick={onClear}>
-          Vider
+        <span className="logs__title">Journal</span>
+        <button type="button" className="icon-btn" onClick={onClear} aria-label="Vider" disabled={!logs.length}>
+          <Trash2 size={15} />
         </button>
-        <button type="button" className="ghost small" onClick={onClose} aria-label="Fermer">
-          ✕
+        <button type="button" className="icon-btn" onClick={onClose} aria-label="Fermer">
+          <X size={16} />
         </button>
       </header>
       <div className="logs__list">
-        {logs.length === 0 && <p className="muted">Les appels au modèle et aux outils MCP s'afficheront ici.</p>}
+        {logs.length === 0 && <p className="muted small">Les appels au modèle et aux outils MCP apparaîtront ici.</p>}
         {logs.map((l, i) => (
           <div key={i} className={`log log--${l.level}`}>
             <span className="log__time">{time(l.at)}</span>

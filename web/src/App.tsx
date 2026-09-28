@@ -44,10 +44,8 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Le thème suit l'écran : celui de l'Agora, ou celui du contexte ouvert.
   const current = screen.name === "room" ? contexts?.find((c) => c.id === screen.id) : undefined;
   useEffect(() => {
-    document.documentElement.dataset.theme = current?.theme ?? "agora";
     document.title = current ? `${current.place} · Agora` : "Agora";
   }, [current]);
 
@@ -64,11 +62,12 @@ export default function App() {
     );
   }
 
-  if (screen.name === "room" && current) {
+  if (screen.name === "room" && current && contexts) {
     return (
       <ContextRoom
         key={current.id}
         context={current}
+        contexts={contexts}
         settings={settings}
         room={rooms[current.id] ?? EMPTY_ROOM}
         onRoom={(update) => setRooms((all) => ({ ...all, [current.id]: update(all[current.id] ?? EMPTY_ROOM) }))}
@@ -77,6 +76,7 @@ export default function App() {
           saveSettings(next);
           setSettings(next);
         }}
+        onSwitch={(id) => setScreen({ name: "room", id })}
         onLeave={() => setScreen({ name: "forum" })}
       />
     );

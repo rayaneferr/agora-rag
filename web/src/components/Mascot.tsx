@@ -1,7 +1,4 @@
-// La chouette d'Agora (générée avec Gemini, fond détouré). L'humeur pilote une légère animation.
-
-type Mood = "idle" | "busy" | "error";
-
-export function Mascot({ size = 40, mood = "idle" }: { size?: number; mood?: Mood }) {
-  return <img className={`mascot mascot--${mood}`} src="/mascot.png" width={size} height={size} alt="" />;
+// La chouette d'Agora (générée avec Gemini, fond détouré) : la marque, rien de plus.
+export function Mascot({ size = 28 }: { size?: number }) {
+  return <img className="mascot" src="/mascot.png" width={size} height={size} alt="" />;
 }

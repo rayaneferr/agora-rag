@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import json
 import os
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass
 
@@ -90,6 +91,39 @@ def _classify(exc: Exception) -> LLMError:
     return LLMError("unknown", f"Erreur inattendue : {message[:400]}")
 
 
+def recover_tool_calls(message: dict, tools: list[dict]) -> dict:
+    """Récupère un appel d'outil que le modèle a écrit en texte au lieu de le structurer.
+
+    Les modèles locaux (qwen2.5 notamment) renvoient parfois `{"name": …, "arguments": …}</tool_call>` dans le
+    contenu : Ollama ne le reconnaît pas, et la « réponse » affichée serait du JSON. On ne convertit que les
+    objets qui nomment un outil réellement exposé ; tout autre texte reste une réponse.
+    """
+    content = message.get("content") or ""
+    if message.get("tool_calls") or '"name"' not in content:
+        return message
+    known = {t["function"]["name"] for t in tools}
+    decoder, calls, i = json.JSONDecoder(), [], 0
+    while (i := content.find("{", i)) >= 0:
+        try:
+            obj, end = decoder.raw_decode(content, i)
+        except json.JSONDecodeError:
+            i += 1
+            continue
+        i = end
+        if isinstance(obj, dict) and obj.get("name") in known:
+            args = obj.get("arguments", obj.get("parameters", {}))
+            calls.append(
+                {
+                    "id": f"call_{uuid.uuid4().hex[:12]}",
+                    "type": "function",
+                    "function": {"name": obj["name"], "arguments": args if isinstance(args, str) else json.dumps(args)},
+                }
+            )
+    if not calls:
+        return message
+    return {**message, "content": "", "tool_calls": calls}
+
+
 def ollama(model: str):
     """LLMPort branché sur un modèle Ollama local."""
 
@@ -115,7 +149,8 @@ def ollama(model: str):
             "prompt_tokens": full.usage.prompt_tokens,
             "completion_tokens": full.usage.completion_tokens,
         }
-        yield {"final": full.choices[0].message.model_dump(exclude_none=True), "usage": usage, "cost": 0.0}
+        message = recover_tool_calls(full.choices[0].message.model_dump(exclude_none=True), tools)
+        yield {"final": message, "usage": usage, "cost": 0.0}
 
     return stream
 

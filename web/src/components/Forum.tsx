@@ -1,11 +1,10 @@
+import { ArrowRight, ChevronDown } from "lucide-react";
 import type { ContextInfo } from "../api";
-import type { Settings } from "./Welcome";
-import { Emblem } from "./Emblem";
+import { ContextIcon } from "./ContextIcon";
 import { Mascot } from "./Mascot";
+import type { Settings } from "./Welcome";
 
-const fmt = (n: number) => n.toLocaleString("fr-FR");
-
-/** Le forum de l'Agora : chaque contexte est un portail, déjà habillé de son propre thème. */
+/** Choix de l'agent : un contexte = une base indexée + son serveur MCP. */
 export function Forum(props: {
   contexts: ContextInfo[] | null;
   settings: Settings;
@@ -13,43 +12,30 @@ export function Forum(props: {
   onChangeModel: () => void;
 }) {
   return (
-    <div className="forum">
-      <div className="frieze" aria-hidden />
-      <header className="forum__head">
-        <div className="brand">
-          <Mascot size={40} />
-          <span className="brand__name">Agora</span>
-        </div>
-        <button type="button" className="ghost small" onClick={props.onChangeModel}>
-          {props.settings.model} · changer
+    <div className="page">
+      <header className="topbar">
+        <span className="brand">
+          <Mascot size={24} />
+          Agora
+        </span>
+        <button type="button" className="btn btn--ghost btn--sm" onClick={props.onChangeModel}>
+          {props.settings.model}
+          <ChevronDown size={14} />
         </button>
       </header>
 
-      <main className="forum__inner">
-        <p className="eyebrow">Le forum</p>
-        <h1 className="forum__title">Choisis ton guide</h1>
-        <p className="muted forum__lede">Chaque guide a son lieu, ses archives et ses outils. Il ne parle que de ce qu'il connaît.</p>
-
-        <div className="portals">
-          {props.contexts === null && <p className="muted">Ouverture des portes…</p>}
+      <main className="forum">
+        <h1>Avec qui veux-tu parler ?</h1>
+        <div className="agents">
+          {props.contexts === null && <p className="muted">Chargement…</p>}
           {props.contexts?.map((c) => (
-            <button key={c.id} type="button" className="portal" data-theme={c.theme} onClick={() => props.onEnter(c.id)}>
-              <span className="portal__decor" aria-hidden />
-              <span className="portal__emblem">
-                <Emblem name={c.emblem} size={72} />
+            <button key={c.id} type="button" className="agent" data-context={c.theme} onClick={() => props.onEnter(c.id)}>
+              <ContextIcon emblem={c.emblem} size={40} />
+              <span className="agent__text">
+                <span className="agent__name">{c.place}</span>
+                <span className="agent__desc">{c.tagline}</span>
               </span>
-              <span className="portal__place">{c.place}</span>
-              <span className="portal__agent">
-                avec <strong>{c.agent}</strong>
-              </span>
-              <span className="portal__tagline">{c.tagline}</span>
-              <span className="portal__desc">{c.description}</span>
-              <span className="portal__meta">
-                <span>{c.corpus_label}</span>
-                <span>{fmt(c.points)} extraits indexés</span>
-                <span>{c.tools.length} outils MCP</span>
-              </span>
-              <span className="portal__cta">Entrer →</span>
+              <ArrowRight className="agent__go" size={18} />
             </button>
           ))}
         </div>

@@ -1,81 +1,75 @@
-import { useState } from "react";
+import { Check, ChevronRight, CircleAlert, Copy } from "lucide-react";
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Source } from "../api";
-import { type AssistantMessage, type Message, type Step, formatMs } from "../conversation";
-import { Emblem } from "./Emblem";
-import { Mascot } from "./Mascot";
+import { type AssistantMessage, type Message, type ToolStep, formatMs } from "../conversation";
 
-const SOURCE_KIND: Record<string, string> = { film: "Film", seance: "Séance" };
+const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? "s" : ""}`;
 
-const STATUS_TEXT: Record<AssistantMessage["status"], string> = {
-  thinking: "Réfléchit…",
-  tool: "Fouille les archives…",
-  writing: "Rédige…",
-  done: "",
-  error: "",
-  stopped: "Arrêté",
-};
-
-function argSummary(args: Record<string, unknown>) {
-  const { query, nom, ...rest } = args;
-  const main = (query ?? nom) as string | undefined;
+/** Ce que l'outil a cherché, en clair : la requête, puis les filtres utiles. */
+function describe(step: ToolStep) {
+  const { query, nom, limit: _limit, ...rest } = step.args;
   const filters = Object.entries(rest)
-    .filter(([k, v]) => v !== null && v !== undefined && k !== "limit")
-    .map(([k, v]) => `${k} : ${v}`);
-  return { main, filters };
+    .filter(([, v]) => v !== null && v !== undefined && v !== "")
+    .map(([k, v]) => `${k.replace("_", " ")} ${v}`);
+  return { query: (query ?? nom) as string | undefined, filters };
 }
 
-function StepView({ step }: { step: Step }) {
-  if (step.kind === "note") return <li className="step-note">{step.text}</li>;
-  const { main, filters } = argSummary(step.args);
+function StepRow({ step }: { step: ToolStep }) {
+  const { query, filters } = describe(step);
   return (
-    <li className={`tool-step tool-step--${step.status}`}>
-      <span className="tool-step__icon" aria-hidden>
-        {step.status === "running" ? <span className="spinner" /> : step.status === "ok" ? "✓" : "!"}
-      </span>
-      <div className="tool-step__body">
-        <div className="tool-step__title">
-          {step.label}
-          <code className="badge">{step.name}</code>
+    <li className={`step step--${step.status}`}>
+      <span className="step__dot" aria-hidden />
+      <div className="step__main">
+        <div className="step__line">
+          <span className="step__label">{step.label}</span>
+          <span className="step__meta">
+            {step.status === "running" && "en cours"}
+            {step.status === "ok" && `${plural(step.count ?? 0, "résultat")} · ${formatMs(step.durationMs ?? 0)}`}
+            {step.status === "error" && "échec"}
+          </span>
         </div>
-        {main && <div className="tool-step__query">« {main} »</div>}
-        {filters.length > 0 && (
-          <div className="chips">
-            {filters.map((f) => (
-              <span key={f} className="chip">
-                {f}
-              </span>
-            ))}
-          </div>
+        {query && <div className="step__query">{query}</div>}
+        {(filters.length > 0 || step.error) && (
+          <div className="step__detail">{step.error ?? filters.join(" · ")}</div>
         )}
-        {step.status === "error" && <div className="tool-step__error">{step.error}</div>}
       </div>
-      <span className="tool-step__meta">
-        {step.status === "ok" && `${step.count} résultat${(step.count ?? 0) > 1 ? "s" : ""} · ${formatMs(step.durationMs ?? 0)}`}
-      </span>
     </li>
   );
 }
 
+/** Les appels MCP : une ligne vivante pendant la recherche, un résumé repliable ensuite. */
 function Activity({ msg }: { msg: AssistantMessage }) {
-  const running = msg.status !== "done" && msg.status !== "error" && msg.status !== "stopped";
-  const [open, setOpen] = useState(true);
-  const tools = msg.steps.filter((s) => s.kind === "tool").length;
-  if (!msg.steps.length) return null;
+  const tools = msg.steps.filter((s): s is ToolStep => s.kind === "tool");
+  const live = msg.status === "thinking" || msg.status === "tool";
+  const [open, setOpen] = useState(false);
+  useEffect(() => setOpen(live), [live]);
+
+  if (!tools.length) {
+    return live ? <div className="activity__live shimmer">Réflexion…</div> : null;
+  }
+  const running = tools.find((t) => t.status === "running");
+  const totalMs = tools.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
+  const summary = live
+    ? running
+      ? `${running.label}…`
+      : "Réflexion…"
+    : `${plural(tools.length, "recherche")} dans les archives · ${formatMs(totalMs)}`;
+
   return (
-    <div className="activity">
-      <button type="button" className="activity__toggle" onClick={() => setOpen((v) => !v)}>
-        <span>{running ? "Recherche en cours" : `${tools} recherche${tools > 1 ? "s" : ""} dans les archives`}</span>
-        <span className={`caret ${open ? "caret--open" : ""}`}>›</span>
+    <div className={`activity ${open ? "is-open" : ""}`}>
+      <button type="button" className="activity__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span className={live ? "shimmer" : ""}>{summary}</span>
+        <ChevronRight className="activity__chevron" size={14} />
       </button>
-      {open && (
-        <ol className="activity__steps">
-          {msg.steps.map((s, i) => (
-            <StepView key={s.kind === "tool" ? s.id : `n${i}`} step={s} />
+      <div className="collapse">
+        <ol className="steps">
+          {tools.map((t) => (
+            <StepRow key={t.id} step={t} />
           ))}
         </ol>
-      )}
+      </div>
     </div>
   );
 }
@@ -83,47 +77,62 @@ function Activity({ msg }: { msg: AssistantMessage }) {
 function Sources({ sources }: { sources: Source[] }) {
   const [all, setAll] = useState(false);
   if (!sources.length) return null;
-  const shown = all ? sources : sources.slice(0, 4);
+  const shown = all ? sources : sources.slice(0, 3);
   return (
     <div className="sources">
-      <div className="sources__head">
-        Sources <span className="muted">({sources.length})</span>
-      </div>
-      <div className="sources__grid">
-        {shown.map((s, i) => (
-          <a key={i} className={`source source--${s.kind}`} href={s.url ?? undefined} target="_blank" rel="noreferrer">
-            <span className="source__kind">{SOURCE_KIND[s.kind] ?? s.kind}</span>
-            <span className="source__title">{s.title}</span>
-            <span className="source__subtitle">{s.subtitle}</span>
-            {s.excerpt && <span className="source__excerpt">{s.excerpt}</span>}
-          </a>
-        ))}
-      </div>
-      {sources.length > 4 && (
-        <button type="button" className="link" onClick={() => setAll((v) => !v)}>
-          {all ? "Réduire" : `Voir les ${sources.length - 4} autres`}
+      {shown.map((s, i) => (
+        <a
+          key={i}
+          className="source"
+          href={s.url ?? undefined}
+          target="_blank"
+          rel="noreferrer"
+          title={s.excerpt || undefined}
+        >
+          <span className="source__title">{s.title}</span>
+          <span className="source__sub">{s.subtitle}</span>
+        </a>
+      ))}
+      {sources.length > 3 && (
+        <button type="button" className="source source--more" onClick={() => setAll((v) => !v)}>
+          {all ? "Moins" : `+${sources.length - 3}`}
         </button>
       )}
     </div>
   );
 }
 
-function StatsLine({ msg }: { msg: AssistantMessage }) {
+function Actions({ msg }: { msg: AssistantMessage }) {
+  const [copied, setCopied] = useState(false);
   const s = msg.stats;
-  if (!s) return null;
+  const detail = s
+    ? `Modèle ${formatMs(s.llm_ms)} · outils ${formatMs(s.tool_ms)} · ${(s.prompt_tokens + s.completion_tokens).toLocaleString("fr-FR")} tokens`
+    : undefined;
   return (
-    <div className="stats" title={`Modèle : ${formatMs(s.llm_ms)} · Outils : ${formatMs(s.tool_ms)}`}>
-      <span>⏱ {formatMs(s.total_ms)}</span>
-      <span>{s.tool_calls} outil{s.tool_calls > 1 ? "s" : ""}</span>
-      <span>
-        {(s.prompt_tokens + s.completion_tokens).toLocaleString("fr-FR")} tokens
-      </span>
-      <span>local · gratuit</span>
+    <div className="actions">
+      <button
+        type="button"
+        className="icon-btn"
+        aria-label="Copier la réponse"
+        onClick={() => {
+          navigator.clipboard?.writeText(msg.content).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+          });
+        }}
+      >
+        {copied ? <Check size={15} /> : <Copy size={15} />}
+      </button>
+      {s && (
+        <span className="actions__time" title={detail}>
+          {formatMs(s.total_ms)}
+        </span>
+      )}
     </div>
   );
 }
 
-export function MessageView({ msg, emblem }: { msg: Message; emblem: string }) {
+export function MessageView({ msg }: { msg: Message }) {
   if (msg.role === "user") {
     return (
       <div className="msg msg--user">
@@ -131,38 +140,27 @@ export function MessageView({ msg, emblem }: { msg: Message; emblem: string }) {
       </div>
     );
   }
-  const busy = msg.status === "thinking" || msg.status === "tool" || msg.status === "writing";
   return (
     <div className="msg msg--assistant">
-      <div className="msg__avatar">
-        <Mascot size={38} mood={msg.status === "error" ? "error" : busy ? "busy" : "idle"} />
-        <span className="msg__emblem">
-          <Emblem name={emblem} size={16} />
-        </span>
-      </div>
-      <div className="msg__body">
-        <Activity msg={msg} />
-        {busy && !msg.content && (
-          <div className="typing">
-            <span className="typing__dots">
-              <i />
-              <i />
-              <i />
-            </span>
-            {STATUS_TEXT[msg.status]}
-          </div>
-        )}
-        {msg.content && (
-          <div className="markdown">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-            {msg.status === "writing" && <span className="cursor" />}
-          </div>
-        )}
-        {msg.status === "stopped" && <div className="notice">Génération arrêtée.</div>}
-        {msg.error && <div className="notice notice--error">{msg.error}</div>}
-        {msg.status === "done" && <Sources sources={msg.sources} />}
-        <StatsLine msg={msg} />
-      </div>
+      <Activity msg={msg} />
+      {msg.content && (
+        <div className="markdown">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+        </div>
+      )}
+      {msg.status === "stopped" && <p className="muted small">Réponse interrompue.</p>}
+      {msg.error && (
+        <div className="notice notice--error">
+          <CircleAlert size={16} />
+          {msg.error}
+        </div>
+      )}
+      {msg.status === "done" && (
+        <>
+          <Sources sources={msg.sources} />
+          <Actions msg={msg} />
+        </>
+      )}
     </div>
   );
 }
