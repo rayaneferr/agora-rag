@@ -40,7 +40,7 @@ class ContextSpec:
     identity: Identity
     system_prompt: str
     server_module: str  # module Python du serveur MCP (lancé en stdio)
-    collections: tuple[str, ...]  # collections Qdrant de la base indexée
+    collections: tuple[str, ...]  # tables de la base indexée
     suggestions: tuple[str, ...]
     tool_labels: dict[str, str] = field(default_factory=dict)  # nom d'outil → libellé lisible
     # Transforme le résultat brut d'un outil MCP en sources citables.

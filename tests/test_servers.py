@@ -8,7 +8,7 @@ from mcp import Client
 from agora.contexts.assemblee.server import mcp as mcp_assemblee
 from agora.contexts.cinema.server import mcp as mcp_cinema
 
-pytestmark = pytest.mark.usefixtures("qdrant_memory")
+pytestmark = pytest.mark.usefixtures("index")
 
 
 async def call(server, tool: str, **args):
@@ -85,3 +85,11 @@ async def test_search_debats_expose_le_groupe():
     res = await call(mcp_assemblee, "search_debats", query="publicité ciblée enfants", orateur="Denis Roux")
     assert res[0]["groupe"] == "RN"
     assert res[0]["section"] == "Protection des enfants" and res[0]["sujet"] == "Article 11"
+
+
+async def test_filtres_echappes():
+    # Les filtres viennent du modèle : une apostrophe ne doit ni casser ni détourner la requête SQL.
+    assert await call(mcp_cinema, "search_films", query="alien", director="O'Brien' OR '1'='1") == []
+    assert await call(mcp_assemblee, "search_debats", query="budget", orateur="d'Artagnan") == []
+    films = await call(mcp_cinema, "search_films", query="alien", director="scott", year_min=1970, year_max=1980)
+    assert [f["title"] for f in films] == ["Alien"]

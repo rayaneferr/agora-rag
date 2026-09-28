@@ -23,7 +23,7 @@ d'outils, le journal technique et la latence.
             ┌──────────────────────────┐          ┌──────────────────────────────────┐
 navigateur ─┤ api.py (FastAPI, SSE)    │          │ llm.py      Ollama · démo        │─> Ollama
 terminal ───┤ cli.py                   │          │ mcp.py      passerelle MCP       │─> serveur MCP du contexte
-            └────────────┬─────────────┘          │ vectorstore Qdrant + bge-m3      │─> Qdrant
+            └────────────┬─────────────┘          │ vectorstore LanceDB + bge-m3     │─> data/lancedb/
                          ▼                        └──────────────▲───────────────────┘
                 ┌─────────────────────────────────────────────────┴───┐
                 │ core/   agent.py (boucle agent, événements)         │
@@ -43,16 +43,14 @@ contexts/assemblee/  idem
 
 ## Démarrage
 
-Prérequis : [uv](https://docs.astral.sh/uv/), Docker, Node, et [Ollama](https://ollama.com/download)
+Prérequis : [uv](https://docs.astral.sh/uv/), Node, et [Ollama](https://ollama.com/download)
 avec un modèle qui sait appeler des outils (`ollama pull qwen2.5:14b` recommandé, `qwen2.5:7b` si la machine
 est plus modeste).
 
 ```bash
 uv sync
-docker run -d --name agora-qdrant --restart unless-stopped -p 6333:6333 \
-  -v "$PWD/qdrant_storage:/qdrant/storage" qdrant/qdrant:v1.19.1
 
-# Archives : téléchargées depuis Hugging Face et restaurées (quelques minutes)…
+# Archives : téléchargées depuis Hugging Face (~900 Mo, une fois ; `uv run agora` le fait aussi au démarrage)…
 uv run agora-index import
 # … ou reconstruites de zéro (~2 h sur un M4 Pro)
 uv run python -m agora.contexts.cinema.ingestion       # --limit 500 pour tester vite
@@ -62,12 +60,9 @@ uv run python -m agora.contexts.assemblee.ingestion    # --limit-seances 20 pour
 uv run agora                                           # ouvre http://127.0.0.1:8765
 ```
 
-> **Colima avec plusieurs profils** : `docker` vise le contexte actif (`docker context ls`). Préfixe la commande
-> par `docker --context colima …` pour que Qdrant tourne dans la VM par défaut et que ses données restent dans
-> `qdrant_storage/` du dépôt, pas dans une VM d'un autre projet.
-
-Hors ligne une fois installé : bge-m3 est chargé depuis le cache local, les polices sont embarquées dans le
-build, et seul Ollama (`localhost:11434`) et Qdrant (`localhost:6333`) sont appelés.
+Ni Docker, ni VM, ni base à lancer : l'index est un dossier (`data/lancedb/`) ouvert directement par
+l'application. Hors ligne une fois installé : bge-m3 est chargé depuis le cache local, les polices sont
+embarquées dans le build, et seul Ollama (`localhost:11434`) est appelé.
 
 Parcours : **l'Agora** (choix du modèle local) → **le Forum** (choix du guide) → **la salle** du contexte,
 qui prend l'identité visuelle de son lieu.
@@ -75,6 +70,27 @@ qui prend l'identité visuelle de son lieu.
 - **Mode démo** : `AGORA_DEMO=1 uv run agora` ajoute un faux modèle instantané qui appelle vraiment les outils.
 - **Front en développement** : `uv run agora --dev` + `cd web && npm run dev` (Vite, rechargement à chaud).
 - **Terminal** : `uv run agora-chat cinema` ou `uv run agora-chat assemblee --model qwen2.5:7b`.
+
+## Pourquoi LanceDB plutôt qu'un serveur vectoriel
+
+La première version stockait l'index dans Qdrant. C'est une très bonne base, mais c'est un **serveur** : sur Mac
+et Windows, il tourne dans Docker, donc dans une machine virtuelle Linux. Pour une application personnelle qui
+doit s'installer par `git clone` + `uv sync`, c'était le prérequis le plus lourd.
+
+LanceDB est **embarqué**, comme SQLite : une bibliothèque Python qui lit un dossier de fichiers (format colonnaire
+Lance). Conséquences mesurées sur ce corpus (187 000 chunks, 1024 dimensions, M4 Pro) :
+
+| | Qdrant 1.19 (Docker) | LanceDB 0.39 (embarqué) |
+|---|---|---|
+| Prérequis | Docker + VM | aucun (`uv sync`) |
+| Index distribué | snapshots, 1,19 Go, à restaurer | dossiers, 0,87 Go, ouverts tels quels |
+| Recherche films (sans filtre) | HNSW approché | exacte, ~50 ms |
+| Recherche filtrée (orateur, genre, dates) | filtre pendant le parcours | pré-filtre SQL, 60 à 250 ms |
+
+La recherche est exhaustive (pas d'index ANN) : à cette taille elle reste sous le quart de seconde et ne manque
+aucun voisin. Comparé à Qdrant sur quatre requêtes, le top 5 est identique partout ; sur le top 20 des films,
+l'index HNSW de Qdrant ne retrouvait que 16 à 17 des 20 vrais plus proches voisins, contre 20/20 ici. Les filtres
+que le modèle passe aux outils sont échappés avant d'entrer dans la clause SQL (`tests/test_servers.py`).
 
 ## Serveurs MCP : stdio ou HTTP
 
@@ -96,7 +112,7 @@ claude mcp add cinema -- uv --directory /chemin/vers/agora-rag run mcp-cinema   
 | Cinéma | [Wikipedia Movie Plots](https://huggingface.co/datasets/vishnupriyavr/wiki-movie-plots-with-summaries) | chunk de synopsis (~1500 car.), préfixé titre/année/genre/réalisateur |
 | Assemblée | [data.assemblee-nationale.fr](https://data.assemblee-nationale.fr/travaux-parlementaires/debats) (XML Syceron) | une intervention (paragraphes consécutifs d'un même orateur sous un même point), préfixée orateur/date/sujet |
 
-Embeddings locaux `BAAI/bge-m3` (multilingue, 1024 dim). L'index prêt à l'emploi (snapshots Qdrant +
+Embeddings locaux `BAAI/bge-m3` (multilingue, 1024 dim). L'index prêt à l'emploi (tables LanceDB +
 manifeste) est publié sur Hugging Face : [rferrat/agora-rag-index](https://huggingface.co/datasets/rferrat/agora-rag-index).
 Synopsis issus de Wikipédia (CC BY-SA) ; comptes rendus de l'Assemblée nationale sous
 [Licence Ouverte](https://data.assemblee-nationale.fr/licence-ouverte-open-licence).
@@ -108,8 +124,8 @@ uv run pytest            # architecture, parseur, chunking, outils MCP et boucle
 uv run ruff check . && uv run ruff format --check .
 ```
 
-Les tests n'ont besoin ni de Docker, ni de bge-m3, ni d'Ollama : les outils sont appelés à travers un client
-MCP en mémoire, avec Qdrant en mode `:memory:`, un embedder factice et le modèle de démo.
+Les tests n'ont besoin ni de bge-m3, ni d'Ollama : les outils sont appelés à travers un client MCP en mémoire,
+sur une base LanceDB temporaire, avec un embedder factice et le modèle de démo.
 
 ## Feuille de route
 
@@ -117,7 +133,7 @@ MCP en mémoire, avec Qdrant en mode `:memory:`, un embedder factice et le modè
 - [ ] **v0.2.0** — tests, lint, CI, serveurs MCP en HTTP, ingestion complète + export d'index
 - [ ] **v0.3.0** — application locale : architecture hexagonale par contextes, Ollama, identité visuelle par lieu
 - [ ] **v0.4.0** — mascottes par guide, historique des conversations, regroupement des extraits par intervention
-- [ ] **v0.5.0** — installation locale en une commande : Qdrant + restauration automatique du snapshot + app
+- [ ] **v0.5.0** — installation sans Docker : index embarqué (LanceDB) téléchargé au premier lancement, front précompilé
 - [ ] **v0.6.0** — groupes politiques, mise à jour incrémentale des séances, nouveaux contextes
 - [ ] **v0.7.0** — benchmark : qualité du retrieval (dense vs hybride), exactitude des citations, latence par modèle local
 

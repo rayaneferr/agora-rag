@@ -49,7 +49,7 @@ async def collect(context: str, message: str, model=None) -> list[dict]:
         return [ev async for ev in run_turn(CONTEXTS[context], model or llm.demo(), gateway, Turn(message))]
 
 
-@pytest.mark.usefixtures("qdrant_memory")
+@pytest.mark.usefixtures("index")
 async def test_tour_complet_cinema():
     events = await collect("cinema", "a weatherman living the same day over and over")
     types = [e["type"] for e in events]
@@ -62,7 +62,7 @@ async def test_tour_complet_cinema():
     assert events[-1]["stats"]["tool_calls"] == 1 and "Groundhog Day" in events[-1]["content"]
 
 
-@pytest.mark.usefixtures("qdrant_memory")
+@pytest.mark.usefixtures("index")
 async def test_chaque_agent_ne_voit_que_les_outils_de_son_contexte():
     async with InMemoryGateway(mcp_cinema) as g:
         assert {t["function"]["name"] for t in g.tool_schemas()} == {"search_films", "get_film"}
@@ -72,7 +72,7 @@ async def test_chaque_agent_ne_voit_que_les_outils_de_son_contexte():
     assert all(s["kind"] == "seance" and s["url"] for s in result["sources"])
 
 
-@pytest.mark.usefixtures("qdrant_memory")
+@pytest.mark.usefixtures("index")
 async def test_outil_en_erreur_ne_casse_pas_le_tour():
     def llm_outil_inconnu():
         async def stream(messages, tools):

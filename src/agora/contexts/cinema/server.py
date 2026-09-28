@@ -1,10 +1,9 @@
 """Serveur MCP « cinema » : RAG sur les synopsis Wikipedia (~35k films)."""
 
 from mcp.server.mcpserver import MCPServer
-from qdrant_client import models
 
+from agora.adapters.outbound import vectorstore as vs
 from agora.adapters.outbound.mcp_serve import serve
-from agora.adapters.outbound.vectorstore import embed, qdrant
 from agora.contexts.cinema import COLLECTION
 from agora.core.text import join_chunks
 
@@ -38,33 +37,22 @@ def search_films(
         year_max: année de sortie maximale (seulement si l'utilisateur précise une période).
         limit: nombre de films à retourner (1-20).
     """
-    must: list[models.Condition] = []
+    n = max(1, min(limit, 20))
+    where = []
     if genre:
-        must.append(models.FieldCondition(key="genre", match=models.MatchText(text=genre)))
+        where.append(f"lower(genre) LIKE {vs.quote(f'%{genre.lower()}%')}")
     if director:
-        must.append(models.FieldCondition(key="director", match=models.MatchText(text=director)))
-    if year_min or year_max:
-        must.append(models.FieldCondition(key="year", range=models.Range(gte=year_min, lte=year_max)))
+        where.append(f"lower(director) LIKE {vs.quote(f'%{director.lower()}%')}")
+    if year_min:
+        where.append(f"year >= {int(year_min)}")
+    if year_max:
+        where.append(f"year <= {int(year_max)}")
 
-    # Plusieurs chunks d'un même film peuvent matcher : on groupe par film_id.
-    groups = (
-        qdrant()
-        .query_points_groups(
-            COLLECTION,
-            query=embed([query])[0],
-            group_by="film_id",
-            # Marge pour absorber les doublons du dataset (même film sous deux « origines »).
-            limit=2 * max(1, min(limit, 20)),
-            group_size=1,
-            query_filter=models.Filter(must=must) if must else None,
-            with_payload=True,
-        )
-        .groups
-    )
+    # Plusieurs chunks d'un même film peuvent matcher : on sur-échantillonne puis on garde le meilleur par film.
+    hits = vs.search(COLLECTION, vs.embed([query])[0], " AND ".join(where) or None, limit=12 * n)
     results, seen = [], set()
-    for g in groups:
-        hit = g.hits[0]
-        p = hit.payload
+    for p in hits:
+        # Dédoublonne par film, et par (titre, année) : le dataset liste certains films sous deux « origines ».
         key = (p["title"].strip().lower(), p["year"])
         if key in seen:
             continue
@@ -77,30 +65,24 @@ def search_films(
                 "director": p["director"],
                 "genre": p["genre"],
                 "cast": p["cast"],
-                "score": round(hit.score, 3),
+                "score": round(p["score"], 3),
                 "summary": p["summary"],
                 "matching_excerpt": p["text"][:600],
                 "wiki_url": p["wiki_url"],
             }
         )
-    return results[: max(1, min(limit, 20))]
+        if len(results) == n:
+            break
+    return results
 
 
 @mcp.tool()
 def get_film(film_id: int) -> dict:
     """Retourne la fiche complète d'un film (synopsis intégral), à partir du film_id de search_films."""
-    points, _ = qdrant().scroll(
-        COLLECTION,
-        scroll_filter=models.Filter(
-            must=[models.FieldCondition(key="film_id", match=models.MatchValue(value=film_id))]
-        ),
-        limit=100,
-        with_payload=True,
-    )
-    if not points:
+    chunks = sorted(vs.select(COLLECTION, f"film_id = {int(film_id)}"), key=lambda p: p["chunk_index"])
+    if not chunks:
         return {"error": f"film_id {film_id} introuvable"}
-    chunks = sorted((p.payload for p in points), key=lambda p: p["chunk_index"])
-    fiche = {k: v for k, v in chunks[0].items() if k not in {"text", "chunk_index"}}
+    fiche = {k: v for k, v in chunks[0].items() if k not in {"id", "text", "chunk_index"}}
     fiche["plot"] = join_chunks([c["text"] for c in chunks])
     return fiche
 

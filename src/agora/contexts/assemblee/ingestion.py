@@ -1,5 +1,5 @@
 """Ingestion des comptes rendus de séance de l'Assemblée nationale (17e législature)
-dans la collection Qdrant `debats`. Unité = une intervention (paragraphes consécutifs
+dans la table LanceDB `debats`. Unité = une intervention (paragraphes consécutifs
 d'un même orateur sous un même point de l'ordre du jour).
 
 uv run python -m agora.contexts.assemblee.ingestion [--limit-seances 10]
@@ -13,15 +13,15 @@ import zipfile
 from collections.abc import Iterator
 from datetime import date
 
+import pyarrow as pa
 from lxml import etree
-from qdrant_client import models
 
-from agora.adapters.outbound.vectorstore import DATA_DIR, embed, embedding_dim, qdrant
+from agora.adapters.outbound import vectorstore as vs
 from agora.contexts.assemblee import COLLECTION
 from agora.core.text import chunk_text
 
 ZIP_URL = "https://data.assemblee-nationale.fr/static/openData/repository/17/vp/syceronbrut/syseron.xml.zip"
-ZIP_PATH = DATA_DIR / "an17_syceron.xml.zip"
+ZIP_PATH = vs.DATA_DIR / "an17_syceron.xml.zip"
 NS = {"an": "http://schemas.assemblee-nationale.fr/referentiel"}
 MIN_CHARS = 120  # sous ce seuil : « La parole est à… », « Très bien ! », etc.
 BATCH = 128
@@ -126,7 +126,7 @@ def parse_seance(xml_bytes: bytes) -> Iterator[dict]:
 
 def iter_interventions(limit_seances: int | None) -> Iterator[dict]:
     if not ZIP_PATH.exists():
-        DATA_DIR.mkdir(exist_ok=True)
+        vs.DATA_DIR.mkdir(exist_ok=True)
         print(f"Téléchargement {ZIP_URL}")
         urllib.request.urlretrieve(ZIP_URL, ZIP_PATH)
     with zipfile.ZipFile(ZIP_PATH) as zf:
@@ -135,17 +135,27 @@ def iter_interventions(limit_seances: int | None) -> Iterator[dict]:
             yield from parse_seance(zf.read(name))
 
 
-def ensure_collection(client, dim: int, recreate: bool = False) -> None:
-    if recreate and client.collection_exists(COLLECTION):
-        client.delete_collection(COLLECTION)
-    if client.collection_exists(COLLECTION):
-        return
-    client.create_collection(COLLECTION, vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE))
-    for field in ("orateur", "groupe", "id_acteur", "seance_uid"):
-        client.create_payload_index(COLLECTION, field, models.PayloadSchemaType.KEYWORD)
-    client.create_payload_index(COLLECTION, "date_int", models.PayloadSchemaType.INTEGER)
-    client.create_payload_index(COLLECTION, "ordre", models.PayloadSchemaType.INTEGER)
-    client.create_payload_index(COLLECTION, "sujet", models.PayloadSchemaType.TEXT)
+TEXT_FIELDS = ("seance_uid", "date", "section", "sujet", "id_acteur", "orateur", "civilite", "groupe", "qualite")
+
+
+def schema(dim: int) -> pa.Schema:
+    return pa.schema(
+        [
+            pa.field("id", pa.string()),
+            *(pa.field(f, pa.string()) for f in TEXT_FIELDS),
+            pa.field("date_int", pa.int32()),
+            pa.field("ordre", pa.int32()),
+            pa.field("role", pa.string()),
+            pa.field("chunk_index", pa.int32()),
+            pa.field("text", pa.string()),
+            pa.field("url", pa.string()),
+            vs.vector_field(dim),
+        ]
+    )
+
+
+def ensure_table(dim: int, recreate: bool = False) -> None:
+    vs.ensure_table(COLLECTION, schema(dim), recreate)
 
 
 def to_chunks(inter: dict) -> list[tuple[str, dict]]:
@@ -158,41 +168,43 @@ def to_chunks(inter: dict) -> list[tuple[str, dict]]:
     ]
 
 
-def index(client, items: list[tuple[str, dict]], embed_fn=embed) -> None:
-    vectors = embed_fn([text for text, _ in items])
-    client.upsert(
-        COLLECTION,
-        points=[
-            models.PointStruct(
-                # Id déterministe : relancer l'ingestion met à jour au lieu de dupliquer.
-                id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{p['seance_uid']}/{p['ordre']}/{p['chunk_index']}")),
-                vector=v,
-                payload=p,
-            )
-            for v, (_, p) in zip(vectors, items, strict=True)
-        ],
-    )
+def point_id(p: dict) -> str:
+    # Id déterministe : relancer l'ingestion met à jour au lieu de dupliquer.
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"{p['seance_uid']}/{p['ordre']}/{p['chunk_index']}"))
+
+
+def index(items: list[tuple[str, dict]], embed_fn=None) -> None:
+    vectors = (embed_fn or vs.embed)([text for text, _ in items])
+    rows = [
+        # Id déterministe : relancer l'ingestion met à jour au lieu de dupliquer.
+        {
+            **p,
+            "id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"{p['seance_uid']}/{p['ordre']}/{p['chunk_index']}")),
+            "vector": v,
+        }
+        for v, (_, p) in zip(vectors, items, strict=True)
+    ]
+    vs.upsert(COLLECTION, rows)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit-seances", type=int, help="Nombre de séances (pour tester vite)")
-    parser.add_argument("--recreate", action="store_true", help="Supprime la collection avant")
+    parser.add_argument("--recreate", action="store_true", help="Supprime la table avant")
     args = parser.parse_args()
 
-    client = qdrant()
-    ensure_collection(client, embedding_dim(), args.recreate)
+    ensure_table(vs.embedding_dim(), args.recreate)
     batch: list[tuple[str, dict]] = []
     total = 0
     for inter in iter_interventions(args.limit_seances):
         batch.extend(to_chunks(inter))
         if len(batch) >= BATCH:
-            index(client, batch)
+            index(batch)
             total += len(batch)
             print(f"  {total} chunks indexés")
             batch = []
     if batch:
-        index(client, batch)
+        index(batch)
         print(f"  {total + len(batch)} chunks indexés")
 
 

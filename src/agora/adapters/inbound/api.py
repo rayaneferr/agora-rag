@@ -19,13 +19,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from agora.adapters.outbound import llm
+from agora.adapters.outbound import vectorstore as vs
 from agora.adapters.outbound.mcp import McpGateway
-from agora.adapters.outbound.vectorstore import ROOT, qdrant
 from agora.contexts import CONTEXTS
 from agora.core.agent import LLMError, Turn, run_turn
 
 log = logging.getLogger("agora")
-WEB_DIST = ROOT / "web" / "dist"
+WEB_DIST = vs.ROOT / "web" / "dist"
 
 
 class State:
@@ -38,11 +38,11 @@ state = State()
 
 
 def _prepare_index() -> None:
-    """Restaure l'index (Hugging Face) si des collections manquent ; en tâche de fond."""
-    from agora.adapters.outbound.snapshots import COLLECTIONS, ensure_index
+    """Télécharge l'index (Hugging Face) si des tables manquent ; en tâche de fond."""
+    from agora.adapters.outbound.index_hub import COLLECTIONS, ensure_index
 
     try:
-        if all(qdrant().collection_exists(c) for c in COLLECTIONS):
+        if all(vs.has_table(c) for c in COLLECTIONS):
             state.index_status = "ready"
             return
         state.index_status = "downloading"
@@ -82,9 +82,9 @@ class ChatRequest(BaseModel):
 
 def _points(collection: str) -> int | None:
     try:
-        return qdrant().count(collection, exact=False).count if qdrant().collection_exists(collection) else 0
+        return vs.count(collection)
     except Exception:
-        return None  # Qdrant injoignable
+        return None  # table en cours de téléchargement
 
 
 @app.get("/api/health")

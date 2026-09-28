@@ -1,4 +1,4 @@
-"""Fixtures : Qdrant en mémoire + embedder factice, pour tester les outils MCP sans Docker ni bge-m3."""
+"""Fixtures : LanceDB dans un dossier temporaire + embedder factice, pour tester les outils MCP sans bge-m3."""
 
 import hashlib
 import math
@@ -7,12 +7,11 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-from qdrant_client import QdrantClient
 
+from agora.adapters.outbound import vectorstore as vs
 from agora.contexts.assemblee import ingestion as ing_an
 from agora.contexts.assemblee import server as srv_an
 from agora.contexts.cinema import ingestion as ing_cinema
-from agora.contexts.cinema import server as srv_cinema
 
 DIM = 256
 
@@ -52,20 +51,19 @@ FILMS = pl.DataFrame(
 
 
 @pytest.fixture
-def qdrant_memory(monkeypatch):
-    client = QdrantClient(":memory:")
-
-    ing_cinema.ensure_collection(client, DIM)
-    ing_cinema.index(client, ing_cinema.build_points(FILMS), embed_fn=fake_embed)
-
-    ing_an.ensure_collection(client, DIM)
-    seance = (Path(__file__).parent / "fixtures" / "seance.xml").read_bytes()
-    items = [chunk for inter in ing_an.parse_seance(seance) for chunk in ing_an.to_chunks(inter)]
-    ing_an.index(client, items, embed_fn=fake_embed)
-
-    for module in (srv_cinema, srv_an):
-        monkeypatch.setattr(module, "qdrant", lambda: client)
-        monkeypatch.setattr(module, "embed", fake_embed)
+def index(monkeypatch, tmp_path):
+    monkeypatch.setattr(vs, "DB_DIR", tmp_path / "lancedb")
+    monkeypatch.setattr(vs, "embed", fake_embed)
+    vs.db.cache_clear()
     srv_an._orateurs.cache_clear()
-    yield client
+
+    ing_cinema.ensure_table(DIM)
+    ing_cinema.index(ing_cinema.build_points(FILMS))
+
+    ing_an.ensure_table(DIM)
+    seance = (Path(__file__).parent / "fixtures" / "seance.xml").read_bytes()
+    ing_an.index([chunk for inter in ing_an.parse_seance(seance) for chunk in ing_an.to_chunks(inter)])
+
+    yield vs.db()
+    vs.db.cache_clear()
     srv_an._orateurs.cache_clear()

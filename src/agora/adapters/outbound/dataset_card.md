@@ -8,7 +8,7 @@ language:
 tags:
   - rag
   - mcp
-  - qdrant
+  - lancedb
   - embeddings
   - bge-m3
   - assemblee-nationale
@@ -20,23 +20,24 @@ size_categories:
 
 # agora-rag — index vectoriel
 
-Snapshots [Qdrant](https://qdrant.tech/) prêts à restaurer, utilisés par
+Tables [LanceDB](https://lancedb.com/) prêtes à l'emploi, utilisées par
 [agora-rag](https://github.com/rayaneferr/agora-rag) : un agent conversationnel local dont le RAG
-est exposé via MCP. L'application les télécharge et les restaure automatiquement au premier
-lancement ; ils évitent environ 2 h de calcul d'embeddings.
+est exposé via MCP. LanceDB est une base embarquée : l'application télécharge ces dossiers au premier
+lancement et les ouvre directement, sans serveur ni restauration. Ils évitent environ 2 h de calcul
+d'embeddings.
 
-| Fichier | Collection | Contenu |
+| Chemin | Table | Contenu |
 |---|---|---|
-| `films.snapshot` | `films` | ~35k synopsis de films Wikipedia, découpés en chunks (~1500 caractères) |
-| `debats.snapshot` | `debats` | Comptes rendus des séances publiques de l'Assemblée nationale (17e législature), une intervention par point |
-| `manifest.json` | — | Nombre de points, modèle d'embeddings, version de Qdrant, date d'export |
+| `lancedb/films.lance/` | `films` | ~35k synopsis de films Wikipedia, découpés en chunks (~1500 caractères) |
+| `lancedb/debats.lance/` | `debats` | Comptes rendus des séances publiques de l'Assemblée nationale (17e législature), une intervention par point |
+| `manifest.json` | — | Nombre de lignes, modèle d'embeddings, version de LanceDB, date d'export |
 
 ## Utilisation
 
 ```bash
 git clone https://github.com/rayaneferr/agora-rag && cd agora-rag
 uv sync
-uv run agora-index import      # télécharge depuis ce dataset et restaure dans Qdrant
+uv run agora-index import      # télécharge les tables dans data/lancedb/
 ```
 
 ## Détails techniques
@@ -44,8 +45,8 @@ uv run agora-index import      # télécharge depuis ce dataset et restaure dans
 - **Embeddings** : [`BAAI/bge-m3`](https://huggingface.co/BAAI/bge-m3), 1024 dimensions, distance cosinus,
   vecteurs normalisés. Les requêtes doivent être encodées avec **le même modèle**.
 - **Texte encodé** : chaque chunk est préfixé de son contexte (titre, année, genre et réalisateur pour les
-  films ; orateur, date et sujet pour les débats), le payload contient le texte brut et les métadonnées.
-- **Qdrant** : snapshots produits avec Qdrant 1.19 ; à restaurer avec une version égale ou supérieure.
+  films ; orateur, date et sujet pour les débats) ; les colonnes contiennent le texte brut et les métadonnées.
+- **Lecture directe** : `lancedb.connect("lancedb").open_table("films")`, ou tout lecteur du format Lance.
 
 ## Licences
 

@@ -1,14 +1,14 @@
 """Serveur MCP « assemblee » : RAG sur les comptes rendus de séance de l'Assemblée nationale (17e lég.)."""
 
 import unicodedata
+from collections import Counter
 from datetime import date
 from functools import lru_cache
 
 from mcp.server.mcpserver import MCPServer
-from qdrant_client import models
 
+from agora.adapters.outbound import vectorstore as vs
 from agora.adapters.outbound.mcp_serve import serve
-from agora.adapters.outbound.vectorstore import embed, qdrant
 from agora.contexts.assemblee import COLLECTION
 from agora.core.text import join_chunks
 
@@ -29,8 +29,8 @@ def _fold(s: str) -> str:
 
 @lru_cache
 def _orateurs() -> dict[str, int]:
-    facets = qdrant().facet(COLLECTION, key="orateur", limit=5000, exact=True)
-    return {h.value: h.count for h in facets.hits}
+    rows = vs.select(COLLECTION, columns=["orateur"], limit=vs.count(COLLECTION))
+    return dict(Counter(r["orateur"] for r in rows if r["orateur"]))
 
 
 def _date_int(d: str | None) -> int | None:
@@ -87,25 +87,15 @@ def search_debats(
         date_max: date maximale incluse, format AAAA-MM-JJ. Seulement si l'utilisateur précise une période.
         limit: nombre d'extraits à retourner (1-20).
     """
-    must: list[models.Condition] = []
+    where = []
     if orateur:
-        must.append(models.FieldCondition(key="orateur", match=models.MatchValue(value=orateur)))
-    if date_min or date_max:
-        must.append(
-            models.FieldCondition(key="date_int", range=models.Range(gte=_date_int(date_min), lte=_date_int(date_max)))
-        )
-    hits = (
-        qdrant()
-        .query_points(
-            COLLECTION,
-            query=embed([query])[0],
-            limit=max(1, min(limit, 20)),
-            query_filter=models.Filter(must=must) if must else None,
-            with_payload=True,
-        )
-        .points
-    )
-    return [_format(h.payload, h.score) for h in hits]
+        where.append(f"orateur = {vs.quote(orateur)}")
+    if date_min:
+        where.append(f"date_int >= {_date_int(date_min)}")
+    if date_max:
+        where.append(f"date_int <= {_date_int(date_max)}")
+    hits = vs.search(COLLECTION, vs.embed([query])[0], " AND ".join(where) or None, limit=max(1, min(limit, 20)))
+    return [_format(h, h["score"]) for h in hits]
 
 
 @mcp.tool()
@@ -118,22 +108,16 @@ def get_contexte(seance_uid: str, ordre: int, avant: int = 3, apres: int = 3) ->
         avant: nombre d'interventions précédentes.
         apres: nombre d'interventions suivantes.
     """
-    points, _ = qdrant().scroll(
+    # L'ordre est la position du paragraphe dans la séance, pas un rang d'intervention :
+    # on prend une fenêtre large puis on coupe.
+    points = vs.select(
         COLLECTION,
-        scroll_filter=models.Filter(
-            must=[
-                models.FieldCondition(key="seance_uid", match=models.MatchValue(value=seance_uid)),
-                # L'ordre est la position du paragraphe dans la séance, pas un rang d'intervention :
-                # on prend une fenêtre large puis on coupe.
-                models.FieldCondition(key="ordre", range=models.Range(gte=ordre - 60, lte=ordre + 60)),
-            ]
-        ),
+        f"seance_uid = {vs.quote(seance_uid)} AND ordre BETWEEN {int(ordre) - 60} AND {int(ordre) + 60}",
         limit=500,
-        with_payload=True,
     )
     # Recolle les chunks d'une même intervention.
     by_ordre: dict[int, list[dict]] = {}
-    for p in sorted((p.payload for p in points), key=lambda p: (p["ordre"], p["chunk_index"])):
+    for p in sorted(points, key=lambda p: (p["ordre"], p["chunk_index"])):
         by_ordre.setdefault(p["ordre"], []).append(p)
     rows = [{**chunks[0], "text": join_chunks([c["text"] for c in chunks])} for chunks in by_ordre.values()]
     idx = next((i for i, p in enumerate(rows) if p["ordre"] >= ordre), len(rows))

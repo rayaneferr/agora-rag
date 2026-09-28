@@ -1,4 +1,4 @@
-"""Ingestion de Wikipedia Movie Plots (~35k films) dans la collection Qdrant `films`.
+"""Ingestion de Wikipedia Movie Plots (~35k films) dans la table LanceDB `films`.
 
 uv run python -m agora.contexts.cinema.ingestion [--limit 500]
 """
@@ -7,9 +7,9 @@ import argparse
 import urllib.request
 
 import polars as pl
-from qdrant_client import models
+import pyarrow as pa
 
-from agora.adapters.outbound.vectorstore import DATA_DIR, embed, embedding_dim, qdrant
+from agora.adapters.outbound import vectorstore as vs
 from agora.contexts.cinema import COLLECTION
 from agora.core.text import chunk_text
 
@@ -17,13 +17,13 @@ CSV_URL = (
     "https://huggingface.co/datasets/vishnupriyavr/wiki-movie-plots-with-summaries/"
     "resolve/main/wiki_movie_plots_deduped_with_summaries.csv"
 )
-CSV_PATH = DATA_DIR / "wiki_movie_plots.csv"
+CSV_PATH = vs.DATA_DIR / "wiki_movie_plots.csv"
 BATCH = 256
 
 
 def load_films(limit: int | None) -> pl.DataFrame:
     if not CSV_PATH.exists():
-        DATA_DIR.mkdir(exist_ok=True)
+        vs.DATA_DIR.mkdir(exist_ok=True)
         print(f"Téléchargement {CSV_URL}")
         urllib.request.urlretrieve(CSV_URL, CSV_PATH)
     df = pl.read_csv(CSV_PATH, infer_schema_length=0).with_row_index("film_id")
@@ -57,41 +57,46 @@ def build_points(df: pl.DataFrame) -> list[tuple[str, dict]]:
     return points
 
 
-def ensure_collection(client, dim: int, recreate: bool = False) -> None:
-    if recreate and client.collection_exists(COLLECTION):
-        client.delete_collection(COLLECTION)
-    if client.collection_exists(COLLECTION):
-        return
-    client.create_collection(COLLECTION, vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE))
-    client.create_payload_index(COLLECTION, "film_id", models.PayloadSchemaType.INTEGER)
-    client.create_payload_index(COLLECTION, "year", models.PayloadSchemaType.INTEGER)
-    for field in ("genre", "director", "cast", "title"):
-        client.create_payload_index(COLLECTION, field, models.PayloadSchemaType.TEXT)
-
-
-def index(client, items: list[tuple[str, dict]], embed_fn=embed) -> None:
-    vectors = embed_fn([text for text, _ in items])
-    client.upsert(
-        COLLECTION,
-        points=[
-            models.PointStruct(id=p["film_id"] * 1000 + p["chunk_index"], vector=v, payload=p)
-            for v, (_, p) in zip(vectors, items, strict=True)
-        ],
+def schema(dim: int) -> pa.Schema:
+    text = pa.string()
+    return pa.schema(
+        [
+            pa.field("id", pa.int64()),
+            pa.field("film_id", pa.int64()),
+            pa.field("title", text),
+            pa.field("year", pa.int32()),
+            *(pa.field(f, text) for f in ("origin", "director", "cast", "genre", "wiki_url", "summary")),
+            pa.field("chunk_index", pa.int32()),
+            pa.field("text", text),
+            vs.vector_field(dim),
+        ]
     )
+
+
+def ensure_table(dim: int, recreate: bool = False) -> None:
+    vs.ensure_table(COLLECTION, schema(dim), recreate)
+
+
+def index(items: list[tuple[str, dict]], embed_fn=None) -> None:
+    vectors = (embed_fn or vs.embed)([text for text, _ in items])
+    rows = [
+        {**p, "id": p["film_id"] * 1000 + p["chunk_index"], "vector": v}
+        for v, (_, p) in zip(vectors, items, strict=True)
+    ]
+    vs.upsert(COLLECTION, rows)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, help="Nombre de films (pour tester vite)")
-    parser.add_argument("--recreate", action="store_true", help="Supprime la collection avant")
+    parser.add_argument("--recreate", action="store_true", help="Supprime la table avant")
     args = parser.parse_args()
 
-    client = qdrant()
-    ensure_collection(client, embedding_dim(), args.recreate)
+    ensure_table(vs.embedding_dim(), args.recreate)
     points = build_points(load_films(args.limit))
     print(f"{len(points)} chunks à indexer")
     for start in range(0, len(points), BATCH):
-        index(client, points[start : start + BATCH])
+        index(points[start : start + BATCH])
         print(f"  {min(start + BATCH, len(points))}/{len(points)}")
 
 
