@@ -1,7 +1,7 @@
 [project]
 name = "agora-rag"
 version = "0.1.0"
-description = "Agent conversationnel RAG exposé via MCP (cinéma + Assemblée nationale)"
+description = "Agents conversationnels locaux, un par contexte (base indexée + serveur MCP) : cinéma, Assemblée nationale"
 authors = [
     { name = "Rayane", email = "rferrat@luccasoftware.com" }
 ]
@@ -11,7 +11,6 @@ dependencies = [
     "litellm>=1.103.0",
     "lxml>=6.1.3",
     "mcp>=2.2.0",
-    "openai>=2.54.0",
     "polars>=1.44.2",
     "python-dotenv>=1.2.3",
     "qdrant-client>=1.19.1",
@@ -20,11 +19,11 @@ dependencies = [
 ]
 
 [project.scripts]
-agora = "agora.api:main"
-agora-chat = "agora.client:main"
-mcp-cinema = "agora.servers.cinema:main"
-mcp-assemblee = "agora.servers.assemblee:main"
-agora-index = "agora.snapshots:main"
+agora = "agora.adapters.inbound.api:main"
+agora-chat = "agora.adapters.inbound.cli:main"
+agora-index = "agora.adapters.outbound.snapshots:main"
+mcp-cinema = "agora.contexts.cinema.server:main"
+mcp-assemblee = "agora.contexts.assemblee.server:main"
 
 [build-system]
 requires = ["uv_build>=0.12.17,<0.13.0"]

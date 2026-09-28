@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from agora.common import chunk_text, join_chunks
-from agora.ingestion.assemblee import parse_seance, split_orateur, to_chunks
+from agora.contexts.assemblee.ingestion import parse_seance, split_orateur, to_chunks
+from agora.core.text import chunk_text, join_chunks
 
 SEANCE = (Path(__file__).parent / "fixtures" / "seance.xml").read_bytes()
 

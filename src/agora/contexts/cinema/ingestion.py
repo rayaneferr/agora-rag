@@ -1,6 +1,6 @@
 """Ingestion de Wikipedia Movie Plots (~35k films) dans la collection Qdrant `films`.
 
-uv run python -m agora.ingestion.cinema [--limit 500]
+uv run python -m agora.contexts.cinema.ingestion [--limit 500]
 """
 
 import argparse
@@ -9,7 +9,9 @@ import urllib.request
 import polars as pl
 from qdrant_client import models
 
-from agora.common import COLLECTION_FILMS, DATA_DIR, chunk_text, embed, embedding_dim, qdrant
+from agora.adapters.outbound.vectorstore import DATA_DIR, embed, embedding_dim, qdrant
+from agora.contexts.cinema import COLLECTION
+from agora.core.text import chunk_text
 
 CSV_URL = (
     "https://huggingface.co/datasets/vishnupriyavr/wiki-movie-plots-with-summaries/"
@@ -56,23 +58,21 @@ def build_points(df: pl.DataFrame) -> list[tuple[str, dict]]:
 
 
 def ensure_collection(client, dim: int, recreate: bool = False) -> None:
-    if recreate and client.collection_exists(COLLECTION_FILMS):
-        client.delete_collection(COLLECTION_FILMS)
-    if client.collection_exists(COLLECTION_FILMS):
+    if recreate and client.collection_exists(COLLECTION):
+        client.delete_collection(COLLECTION)
+    if client.collection_exists(COLLECTION):
         return
-    client.create_collection(
-        COLLECTION_FILMS, vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE)
-    )
-    client.create_payload_index(COLLECTION_FILMS, "film_id", models.PayloadSchemaType.INTEGER)
-    client.create_payload_index(COLLECTION_FILMS, "year", models.PayloadSchemaType.INTEGER)
+    client.create_collection(COLLECTION, vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE))
+    client.create_payload_index(COLLECTION, "film_id", models.PayloadSchemaType.INTEGER)
+    client.create_payload_index(COLLECTION, "year", models.PayloadSchemaType.INTEGER)
     for field in ("genre", "director", "cast", "title"):
-        client.create_payload_index(COLLECTION_FILMS, field, models.PayloadSchemaType.TEXT)
+        client.create_payload_index(COLLECTION, field, models.PayloadSchemaType.TEXT)
 
 
 def index(client, items: list[tuple[str, dict]], embed_fn=embed) -> None:
     vectors = embed_fn([text for text, _ in items])
     client.upsert(
-        COLLECTION_FILMS,
+        COLLECTION,
         points=[
             models.PointStruct(id=p["film_id"] * 1000 + p["chunk_index"], vector=v, payload=p)
             for v, (_, p) in zip(vectors, items, strict=True)

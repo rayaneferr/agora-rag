@@ -9,10 +9,10 @@ import polars as pl
 import pytest
 from qdrant_client import QdrantClient
 
-from agora.ingestion import assemblee as ing_an
-from agora.ingestion import cinema as ing_cinema
-from agora.servers import assemblee as srv_an
-from agora.servers import cinema as srv_cinema
+from agora.contexts.assemblee import ingestion as ing_an
+from agora.contexts.assemblee import server as srv_an
+from agora.contexts.cinema import ingestion as ing_cinema
+from agora.contexts.cinema import server as srv_cinema
 
 DIM = 256
 

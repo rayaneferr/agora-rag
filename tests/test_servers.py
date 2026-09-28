@@ -5,8 +5,8 @@ import json
 import pytest
 from mcp import Client
 
-from agora.servers.assemblee import mcp as mcp_assemblee
-from agora.servers.cinema import mcp as mcp_cinema
+from agora.contexts.assemblee.server import mcp as mcp_assemblee
+from agora.contexts.cinema.server import mcp as mcp_cinema
 
 pytestmark = pytest.mark.usefixtures("qdrant_memory")
 

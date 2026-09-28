@@ -7,8 +7,10 @@ from functools import lru_cache
 from mcp.server.mcpserver import MCPServer
 from qdrant_client import models
 
-from agora.common import COLLECTION_DEBATS, embed, join_chunks, qdrant
-from agora.servers._run import serve
+from agora.adapters.outbound.mcp_serve import serve
+from agora.adapters.outbound.vectorstore import embed, qdrant
+from agora.contexts.assemblee import COLLECTION
+from agora.core.text import join_chunks
 
 mcp = MCPServer(
     "assemblee",
@@ -27,7 +29,7 @@ def _fold(s: str) -> str:
 
 @lru_cache
 def _orateurs() -> dict[str, int]:
-    facets = qdrant().facet(COLLECTION_DEBATS, key="orateur", limit=5000, exact=True)
+    facets = qdrant().facet(COLLECTION, key="orateur", limit=5000, exact=True)
     return {h.value: h.count for h in facets.hits}
 
 
@@ -95,7 +97,7 @@ def search_debats(
     hits = (
         qdrant()
         .query_points(
-            COLLECTION_DEBATS,
+            COLLECTION,
             query=embed([query])[0],
             limit=max(1, min(limit, 20)),
             query_filter=models.Filter(must=must) if must else None,
@@ -117,7 +119,7 @@ def get_contexte(seance_uid: str, ordre: int, avant: int = 3, apres: int = 3) ->
         apres: nombre d'interventions suivantes.
     """
     points, _ = qdrant().scroll(
-        COLLECTION_DEBATS,
+        COLLECTION,
         scroll_filter=models.Filter(
             must=[
                 models.FieldCondition(key="seance_uid", match=models.MatchValue(value=seance_uid)),

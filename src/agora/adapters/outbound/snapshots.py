@@ -14,10 +14,11 @@ from pathlib import Path
 
 import httpx
 
-from agora.common import COLLECTION_DEBATS, COLLECTION_FILMS, DATA_DIR, EMBED_MODEL, QDRANT_URL, qdrant
+from agora.adapters.outbound.vectorstore import DATA_DIR, EMBED_MODEL, QDRANT_URL, qdrant
+from agora.contexts import CONTEXTS
 
 SNAPSHOT_DIR = DATA_DIR / "snapshots"
-COLLECTIONS = [COLLECTION_FILMS, COLLECTION_DEBATS]
+COLLECTIONS = [c for spec in CONTEXTS.values() for c in spec.collections]
 HF_REPO = os.getenv("AGORA_HF_REPO", "rferrat/agora-rag-index")
 MANIFEST = "manifest.json"
 

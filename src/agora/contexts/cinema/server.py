@@ -3,8 +3,10 @@
 from mcp.server.mcpserver import MCPServer
 from qdrant_client import models
 
-from agora.common import COLLECTION_FILMS, embed, join_chunks, qdrant
-from agora.servers._run import serve
+from agora.adapters.outbound.mcp_serve import serve
+from agora.adapters.outbound.vectorstore import embed, qdrant
+from agora.contexts.cinema import COLLECTION
+from agora.core.text import join_chunks
 
 mcp = MCPServer(
     "cinema",
@@ -48,7 +50,7 @@ def search_films(
     groups = (
         qdrant()
         .query_points_groups(
-            COLLECTION_FILMS,
+            COLLECTION,
             query=embed([query])[0],
             group_by="film_id",
             # Marge pour absorber les doublons du dataset (même film sous deux « origines »).
@@ -88,7 +90,7 @@ def search_films(
 def get_film(film_id: int) -> dict:
     """Retourne la fiche complète d'un film (synopsis intégral), à partir du film_id de search_films."""
     points, _ = qdrant().scroll(
-        COLLECTION_FILMS,
+        COLLECTION,
         scroll_filter=models.Filter(
             must=[models.FieldCondition(key="film_id", match=models.MatchValue(value=film_id))]
         ),

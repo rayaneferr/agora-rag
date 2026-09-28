@@ -2,7 +2,7 @@
 dans la collection Qdrant `debats`. Unité = une intervention (paragraphes consécutifs
 d'un même orateur sous un même point de l'ordre du jour).
 
-uv run python -m agora.ingestion.assemblee [--limit-seances 10]
+uv run python -m agora.contexts.assemblee.ingestion [--limit-seances 10]
 """
 
 import argparse
@@ -16,7 +16,9 @@ from datetime import date
 from lxml import etree
 from qdrant_client import models
 
-from agora.common import COLLECTION_DEBATS, DATA_DIR, chunk_text, embed, embedding_dim, qdrant
+from agora.adapters.outbound.vectorstore import DATA_DIR, embed, embedding_dim, qdrant
+from agora.contexts.assemblee import COLLECTION
+from agora.core.text import chunk_text
 
 ZIP_URL = "https://data.assemblee-nationale.fr/static/openData/repository/17/vp/syceronbrut/syseron.xml.zip"
 ZIP_PATH = DATA_DIR / "an17_syceron.xml.zip"
@@ -134,18 +136,16 @@ def iter_interventions(limit_seances: int | None) -> Iterator[dict]:
 
 
 def ensure_collection(client, dim: int, recreate: bool = False) -> None:
-    if recreate and client.collection_exists(COLLECTION_DEBATS):
-        client.delete_collection(COLLECTION_DEBATS)
-    if client.collection_exists(COLLECTION_DEBATS):
+    if recreate and client.collection_exists(COLLECTION):
+        client.delete_collection(COLLECTION)
+    if client.collection_exists(COLLECTION):
         return
-    client.create_collection(
-        COLLECTION_DEBATS, vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE)
-    )
+    client.create_collection(COLLECTION, vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE))
     for field in ("orateur", "groupe", "id_acteur", "seance_uid"):
-        client.create_payload_index(COLLECTION_DEBATS, field, models.PayloadSchemaType.KEYWORD)
-    client.create_payload_index(COLLECTION_DEBATS, "date_int", models.PayloadSchemaType.INTEGER)
-    client.create_payload_index(COLLECTION_DEBATS, "ordre", models.PayloadSchemaType.INTEGER)
-    client.create_payload_index(COLLECTION_DEBATS, "sujet", models.PayloadSchemaType.TEXT)
+        client.create_payload_index(COLLECTION, field, models.PayloadSchemaType.KEYWORD)
+    client.create_payload_index(COLLECTION, "date_int", models.PayloadSchemaType.INTEGER)
+    client.create_payload_index(COLLECTION, "ordre", models.PayloadSchemaType.INTEGER)
+    client.create_payload_index(COLLECTION, "sujet", models.PayloadSchemaType.TEXT)
 
 
 def to_chunks(inter: dict) -> list[tuple[str, dict]]:
@@ -161,7 +161,7 @@ def to_chunks(inter: dict) -> list[tuple[str, dict]]:
 def index(client, items: list[tuple[str, dict]], embed_fn=embed) -> None:
     vectors = embed_fn([text for text, _ in items])
     client.upsert(
-        COLLECTION_DEBATS,
+        COLLECTION,
         points=[
             models.PointStruct(
                 # Id déterministe : relancer l'ingestion met à jour au lieu de dupliquer.

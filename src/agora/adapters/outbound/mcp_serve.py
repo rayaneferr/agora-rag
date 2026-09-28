@@ -5,7 +5,7 @@ import os
 
 from mcp.server.mcpserver import MCPServer
 
-from agora.common import warm_up
+from agora.adapters.outbound.vectorstore import warm_up
 
 
 def serve(mcp: MCPServer, default_port: int) -> None:
