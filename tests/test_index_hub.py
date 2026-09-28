@@ -35,15 +35,6 @@ def test_verify_refuse_fichier_modifie_tronque_ou_absent(tmp_path):
     assert "c.json: absent" in message
 
 
-def test_progression_compte_les_fichiers_finis_et_partiels(tmp_path):
-    files = [_remote("a.lance", b"a" * 100, True), _remote("b.lance", b"b" * 100, True)]
-    (tmp_path / "a.lance").write_bytes(b"a" * 100)
-    partial = tmp_path / ".cache" / "huggingface" / "download"
-    partial.mkdir(parents=True)
-    (partial / "b.lance.incomplete").write_bytes(b"b" * 40)
-    assert hub.download_progress(tmp_path, files) == (140, 200)
-
-
 def test_revision_epinglee_est_un_commit():
     assert len(hub.INDEX_REVISION) == 40 and int(hub.INDEX_REVISION, 16)
 

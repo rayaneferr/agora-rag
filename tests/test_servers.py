@@ -130,7 +130,18 @@ async def test_resource_archives():
     async with Client(mcp_cinema) as client:
         result = await client.read_resource("cinema://archives")
     archives = json.loads(result.contents[0].text)
-    assert archives["guide"] == "Lumière"
+    assert archives["lieu"] == "La Salle obscure"
     assert archives["etendue"] == "films sortis de 1979 à 2010"
     assert archives["extraits_indexes"] > 0
     assert set(archives["outils"]) == {"search_films", "get_film"}
+    # La licence voyage avec les données : le client sait qui citer.
+    assert {s["license"] for s in archives["sources"]} == {"CC BY-SA 4.0"}
+    assert archives["sources"][0]["producer"] == "Contributeurs de Wikipédia"
+
+
+async def test_resource_archives_assemblee_cite_le_producteur():
+    async with Client(mcp_assemblee) as client:
+        result = await client.read_resource("assemblee://archives")
+    source = json.loads(result.contents[0].text)["sources"][0]
+    assert source["producer"] == "Assemblée nationale"
+    assert source["license"].startswith("Licence Ouverte")

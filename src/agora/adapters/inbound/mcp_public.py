@@ -1,11 +1,12 @@
-"""Adaptateur entrant « MCP public » : les serveurs de tous les contextes, sur un seul port, prêts à héberger.
+"""Adaptateur entrant « MCP en HTTP » : les serveurs de tous les contextes, sur un seul port.
 
 uv run agora-mcp-public                      # http://127.0.0.1:8100/cinema/mcp, /assemblee/mcp, /health
-uv run agora-mcp-public --host 0.0.0.0 --allow-remote   # dans le conteneur du Space
+uv run agora-mcp-public --host 0.0.0.0 --allow-remote   # exposé au-delà de la machine (hébergement)
 
-Un seul processus pour tous les contextes : bge-m3 (~2,3 Go) n'est chargé qu'une fois, et un Space Hugging Face
-n'expose qu'un port. Les serveurs sont sans état et en lecture seule ; faute d'authentification (le corpus est
-public), l'exposition repose sur des garde-fous : hôtes autorisés, taille des requêtes, débit par IP.
+Pour les clients qui parlent HTTP plutôt que stdio, et pour héberger le service : un seul processus pour tous les
+contextes, donc bge-m3 (~2,3 Go) n'est chargé qu'une fois et un seul port suffit. Les serveurs sont sans état et en
+lecture seule ; faute d'authentification (le corpus est public), une exposition au-delà de la machine repose sur
+des garde-fous : hôtes autorisés, taille des requêtes, débit par IP.
 """
 
 import argparse

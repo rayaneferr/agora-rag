@@ -1,54 +1,37 @@
 """Contexte « cinéma » : ~35 000 synopsis Wikipédia, servis par le serveur MCP cinema."""
 
-from typing import Any
-
-from agora.core.context import ContextSpec, Identity, Source
+from agora.core.context import ContextSpec, DataSource, Identity
 
 COLLECTION = "films"
-
-
-def to_sources(tool: str, payload: Any) -> list[Source]:
-    items = payload if isinstance(payload, list) else [payload]
-    return [
-        Source(
-            kind="film",
-            title=it.get("title") or "?",
-            subtitle=" · ".join(str(x) for x in (it.get("year"), it.get("director")) if x),
-            url=it.get("wiki_url"),
-            excerpt=(it.get("summary") or it.get("matching_excerpt") or it.get("plot") or "")[:280],
-            score=it.get("score"),
-        )
-        for it in items
-        if isinstance(it, dict) and "error" not in it
-    ]
-
 
 SPEC = ContextSpec(
     id="cinema",
     identity=Identity(
         place="La Salle obscure",
-        agent="Lumière",
-        tagline="Raconte une scène, je retrouve le film.",
         description=(
-            "Décris une intrigue, une ambiance ou un souvenir flou : Lumière fouille 35 000 synopsis "
-            "Wikipédia et te propose les films qui correspondent, avec leur fiche."
+            "Synopsis de ~35 000 films issus de Wikipédia (en anglais) : retrouver un film à partir d'une "
+            "intrigue, d'une ambiance ou d'un souvenir flou, et lire sa fiche. Chaque film renvoie vers sa page."
         ),
-        theme="salle",
-        emblem="clap",
         corpus_label="35 000 films",
     ),
-    system_prompt="""Tu es Lumière, l'ouvreuse de « La Salle obscure ». Tu aides à retrouver et à découvrir des
-films grâce à une base de ~35 000 synopsis Wikipédia (en anglais).
-Ton domaine, et rien d'autre : retrouver un film à partir d'une description, résumer ou expliquer une intrigue,
-comparer ou recommander des films présents dans la base. Séries, actualité du cinéma, box-office, vie privée
-des acteurs, et tout sujet non cinématographique sont hors domaine.
-- search_films pour chercher par intrigue, thème ou ambiance ; formule la requête en anglais, c'est la langue
-  des synopsis. Filtres possibles : genre, réalisateur, années.
-- get_film pour lire le synopsis complet d'un film avant d'en parler en détail.
-- Cite chaque film avec son titre et son année. Une ligne par film proposé, sans divulgâcher la fin sauf si on
-  te le demande.""",
     server_module="agora.contexts.cinema.server",
     collections=(COLLECTION,),
+    sources=(
+        DataSource(
+            name="Wikipédia en anglais, sections « Plot » des articles de films",
+            url="https://en.wikipedia.org/",
+            producer="Contributeurs de Wikipédia",
+            license="CC BY-SA 4.0",
+            license_url="https://creativecommons.org/licenses/by-sa/4.0/",
+        ),
+        DataSource(
+            name="Wikipedia Movie Plots with AI Plot Summaries (miroir Hugging Face)",
+            url="https://huggingface.co/datasets/vishnupriyavr/wiki-movie-plots-with-summaries",
+            producer="JustinR (collecte, Kaggle) ; Gabriel Tardochi (résumés DistilBART)",
+            license="CC BY-SA 4.0",
+            license_url="https://creativecommons.org/licenses/by-sa/4.0/",
+        ),
+    ),
     suggestions=(
         "Un film où un homme revit la même journée en boucle",
         "Des films de science-fiction réalisés par Ridley Scott",
@@ -58,5 +41,4 @@ des acteurs, et tout sujet non cinématographique sont hors domaine.
     coverage_column="year",
     coverage_label="films sortis de {min} à {max}",
     tool_labels={"search_films": "Recherche dans les synopsis", "get_film": "Lecture de la fiche du film"},
-    to_sources=to_sources,
 )

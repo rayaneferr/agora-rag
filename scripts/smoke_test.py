@@ -1,7 +1,7 @@
 """Vérifie un déploiement des serveurs MCP publics, à travers le vrai protocole (Streamable HTTP).
 
 uv run python scripts/smoke_test.py                                   # http://127.0.0.1:8100
-uv run python scripts/smoke_test.py https://rferrat-agora-mcp.hf.space
+uv run python scripts/smoke_test.py https://mcp.example.org      # un déploiement
 
 Pour chaque contexte : /health, liste des outils, une vraie recherche, un prompt et la resource d'archives.
 Code de sortie non nul au premier échec.

@@ -11,4 +11,3 @@ wheels/
 
 .env
 data/
-qdrant_storage/
