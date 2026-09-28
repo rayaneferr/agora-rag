@@ -1,34 +1,20 @@
-"""Client conversationnel : n'importe quel LLM (via LiteLLM, clé fournie par l'utilisateur)
-branché sur les serveurs MCP « cinema » et « assemblee ».
+"""Client conversationnel en ligne de commande : même boucle agent que l'interface web.
 
-uv run agora-chat --model anthropic/claude-sonnet-5
 uv run agora-chat --model openai/gpt-5.4-mini
-uv run agora-chat --model openai/gpt-5.4-mini --mcp-url http://localhost:8101/mcp --mcp-url http://localhost:8102/mcp
+uv run agora-chat --model openai/gpt-5.4-mini --mcp-url cinema=http://localhost:8101/mcp
 """
 
 import argparse
 import asyncio
-import contextlib
 import getpass
 import json
 import os
 import sys
-import time
 
 import litellm
-from mcp.client.session_group import ClientSessionGroup, StreamableHttpParameters
-from mcp.client.stdio import StdioServerParameters
+from mcp.client.session_group import ClientSessionGroup
 
-from agora.common import ROOT
-
-SERVERS = ["agora.servers.cinema", "agora.servers.assemblee"]
-MAX_TOOL_ROUNDS = 8
-
-SYSTEM_PROMPT = """Tu es un assistant spécialisé en cinéma et en vie parlementaire française.
-Tu disposes d'outils de recherche sur deux bases : des synopsis de films et les comptes rendus
-de l'Assemblée nationale. Appuie-toi sur ces outils plutôt que sur ta mémoire, reformule ou relance
-une recherche si les résultats sont mauvais, et cite tes sources (titre + année, ou orateur + date + URL).
-Si les outils ne trouvent rien, dis-le au lieu d'inventer. Réponds en français."""
+from agora.agent import LLMError, Turn, connect_servers, run_turn
 
 
 def resolve_api_key(model: str, cli_key: str | None) -> str | None:
@@ -41,68 +27,12 @@ def resolve_api_key(model: str, cli_key: str | None) -> str | None:
     return getpass.getpass(f"Clé API pour {model} ({', '.join(missing)}) : ").strip()
 
 
-def server_params(urls: list[str] | None) -> list[StdioServerParameters | StreamableHttpParameters]:
-    """URLs fournies : serveurs HTTP déjà lancés. Sinon : on lance les serveurs en sous-processus stdio."""
-    if urls:
-        return [StreamableHttpParameters(url=u) for u in urls]
-    return [StdioServerParameters(command=sys.executable, args=["-m", m], cwd=str(ROOT)) for m in SERVERS]
-
-
-def to_openai_tools(group: ClientSessionGroup) -> list[dict]:
-    return [
-        {
-            "type": "function",
-            "function": {"name": name, "description": tool.description or "", "parameters": tool.input_schema},
-        }
-        for name, tool in group.tools.items()
-    ]
-
-
-def result_to_text(result) -> str:
-    if result.structured_content is not None:
-        return json.dumps(result.structured_content, ensure_ascii=False)
-    return "\n".join(getattr(c, "text", "") for c in result.content)
-
-
-async def answer(group, tools, messages, model, api_key) -> dict:
-    """Boucle agent : le LLM appelle des outils MCP jusqu'à pouvoir répondre."""
-    stats = {"latency_s": 0.0, "prompt_tokens": 0, "completion_tokens": 0, "cost_usd": 0.0, "tool_calls": 0}
-    for _ in range(MAX_TOOL_ROUNDS):
-        t0 = time.perf_counter()
-        resp = await litellm.acompletion(model=model, messages=messages, tools=tools, api_key=api_key)
-        stats["latency_s"] += time.perf_counter() - t0
-        stats["prompt_tokens"] += resp.usage.prompt_tokens
-        stats["completion_tokens"] += resp.usage.completion_tokens
-        with contextlib.suppress(Exception):  # modèle absent de la grille de prix LiteLLM
-            stats["cost_usd"] += litellm.completion_cost(resp)
-
-        msg = resp.choices[0].message
-        messages.append(msg.model_dump(exclude_none=True))
-        if not msg.tool_calls:
-            print(f"\n{msg.content}\n")
-            return stats
-
-        for call in msg.tool_calls:
-            args = json.loads(call.function.arguments or "{}")
-            print(f"  → {call.function.name}({json.dumps(args, ensure_ascii=False)})", file=sys.stderr)
-            t0 = time.perf_counter()
-            result = await group.call_tool(call.function.name, args)
-            stats["latency_s"] += time.perf_counter() - t0
-            stats["tool_calls"] += 1
-            messages.append({"role": "tool", "tool_call_id": call.id, "content": result_to_text(result)})
-    print("\n[Arrêt : trop d'appels d'outils sans réponse finale]\n")
-    return stats
-
-
-async def run(model: str, api_key: str | None, mcp_urls: list[str] | None) -> None:
+async def run(model: str, api_key: str | None, mcp_urls: dict[str, str]) -> None:
     async with ClientSessionGroup() as group:
-        for params in server_params(mcp_urls):
-            await group.connect_to_server(params)
-        tools = to_openai_tools(group)
-        print(f"Modèle : {model} — outils MCP : {', '.join(group.tools)}")
+        tool_servers = await connect_servers(group, mcp_urls)
+        print(f"Modèle : {model} — outils MCP : {', '.join(tool_servers)}")
         print("Pose ta question (Ctrl-D pour quitter).\n")
-
-        messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        history: list[dict] = []
         while True:
             try:
                 question = input("> ").strip()
@@ -110,13 +40,30 @@ async def run(model: str, api_key: str | None, mcp_urls: list[str] | None) -> No
                 return
             if not question:
                 continue
-            messages.append({"role": "user", "content": question})
-            s = await answer(group, tools, messages, model, api_key)
-            print(
-                f"[{s['latency_s']:.1f}s · {s['prompt_tokens']}+{s['completion_tokens']} tokens · "
-                f"${s['cost_usd']:.4f} · {s['tool_calls']} appels d'outils]\n",
-                file=sys.stderr,
-            )
+            turn = Turn(model=model, api_key=api_key, history=history, message=question)
+            print()
+            try:
+                async for ev in run_turn(group, turn, tool_servers):
+                    if ev["type"] == "token":
+                        print(ev["text"], end="", flush=True)
+                    elif ev["type"] == "tool_call":
+                        print(f"  → {ev['name']}({json.dumps(ev['args'], ensure_ascii=False)})", file=sys.stderr)
+                    elif ev["type"] == "done":
+                        s = ev["stats"]
+                        history += [
+                            {"role": "user", "content": question},
+                            {"role": "assistant", "content": ev["content"]},
+                        ]
+                        tokens = s["prompt_tokens"] + s["completion_tokens"]
+                        print(
+                            f"\n\n[{s['total_ms'] / 1000:.1f}s · {tokens} tokens · "
+                            f"${s['cost_usd']:.4f} · {s['tool_calls']} appels d'outils]\n",
+                            file=sys.stderr,
+                        )
+                    elif ev["type"] == "error":
+                        print(f"\n[{ev['message']}]\n", file=sys.stderr)
+            except LLMError as exc:
+                print(f"\n[{exc}]\n", file=sys.stderr)
 
 
 def main() -> None:
@@ -126,14 +73,16 @@ def main() -> None:
     parser.add_argument(
         "--mcp-url",
         action="append",
-        default=[u for u in os.getenv("MCP_URLS", "").split(",") if u],
-        help="URL d'un serveur MCP HTTP (répétable ; sinon MCP_URLS, sinon lancement stdio local)",
+        default=[],
+        metavar="SERVEUR=URL",
+        help="Serveur MCP HTTP déjà lancé, ex. cinema=http://localhost:8101/mcp (sinon lancement stdio local)",
     )
     args = parser.parse_args()
     if not args.model:
         parser.error("précise --model (ou LLM_MODEL dans .env)")
+    urls = dict(u.split("=", 1) for u in args.mcp_url)
     litellm.suppress_debug_info = True
-    asyncio.run(run(args.model, resolve_api_key(args.model, args.api_key), args.mcp_url))
+    asyncio.run(run(args.model, resolve_api_key(args.model, args.api_key), urls))
 
 
 if __name__ == "__main__":
