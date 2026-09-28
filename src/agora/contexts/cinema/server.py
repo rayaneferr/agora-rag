@@ -3,8 +3,8 @@
 from mcp.server.mcpserver import MCPServer
 
 from agora.adapters.outbound import vectorstore as vs
-from agora.adapters.outbound.mcp_serve import serve
-from agora.contexts.cinema import COLLECTION
+from agora.adapters.outbound.mcp_serve import archives, guided_prompt, serve
+from agora.contexts.cinema import COLLECTION, SPEC
 from agora.core.text import join_chunks
 
 mcp = MCPServer(
@@ -85,6 +85,86 @@ def get_film(film_id: int) -> dict:
     fiche = {k: v for k, v in chunks[0].items() if k not in {"id", "text", "chunk_index"}}
     fiche["plot"] = join_chunks([c["text"] for c in chunks])
     return fiche
+
+
+# Règles transmises à l'assistant de l'utilisateur par les prompts : c'est lui qui rédige la réponse.
+RULES = [
+    "Ne propose que des films renvoyés par les outils, jamais de mémoire.",
+    "Cite chaque film avec son titre, son année et son lien Wikipédia.",
+    "Formule les requêtes de search_films en anglais : c'est la langue des synopsis.",
+    "Ne divulgâche pas la fin, sauf si on te le demande.",
+    "Si rien ne correspond, dis-le en une phrase plutôt que d'inventer.",
+]
+
+
+@mcp.resource(
+    "cinema://archives",
+    title="Archives de La Salle obscure",
+    description="Étendue des synopsis indexés, outils disponibles et exemples de questions.",
+    mime_type="application/json",
+)
+def archives_cinema() -> dict:
+    return archives(SPEC)
+
+
+@mcp.prompt(
+    name="trouver-un-film",
+    title="Retrouver un film",
+    description="Retrouve un film à partir d'une scène, d'une intrigue ou d'un souvenir flou.",
+)
+def trouver_un_film(souvenir: str) -> str:
+    return guided_prompt(
+        SPEC,
+        f"Je cherche un film dont je me souviens ainsi : « {souvenir} ». Lequel est-ce ?",
+        [
+            "Traduis le souvenir en une description d'intrigue en anglais, et appelle search_films avec.",
+            "Si plusieurs films sont plausibles, appelle get_film sur les meilleurs pour vérifier l'intrigue.",
+            "Donne le film le plus probable et pourquoi il correspond, puis deux autres pistes au plus.",
+        ],
+        RULES,
+    )
+
+
+@mcp.prompt(
+    name="recommander-des-films",
+    title="Des films selon une envie",
+    description="Des films qui correspondent à une envie, avec un genre et une période optionnels.",
+)
+def recommander_des_films(
+    envie: str, genre: str | None = None, annee_min: str | None = None, annee_max: str | None = None
+) -> str:
+    given = {"genre": genre, "year_min": annee_min, "year_max": annee_max}
+    filters = ", ".join(f"{k}={v}" for k, v in given.items() if v)
+    return guided_prompt(
+        SPEC,
+        f"Propose-moi des films qui correspondent à cette envie : « {envie} ».",
+        [
+            "Appelle search_films avec l'envie reformulée en anglais"
+            + (f" et les filtres {filters}" if filters else "")
+            + " ; relance avec une autre formulation si les résultats sont décevants.",
+            "Retiens cinq films au plus, les plus proches de l'envie.",
+            "Une ligne par film : titre, année, et ce qui le rattache à l'envie.",
+        ],
+        RULES,
+    )
+
+
+@mcp.prompt(
+    name="fiche-film",
+    title="Fiche d'un film",
+    description="L'intrigue d'un film précis, lue dans son synopsis complet.",
+)
+def fiche_film(titre: str) -> str:
+    return guided_prompt(
+        SPEC,
+        f"Présente-moi le film « {titre} ».",
+        [
+            "Appelle search_films avec le titre pour obtenir son film_id ; en cas d'homonymes, demande lequel.",
+            "Appelle get_film avec ce film_id pour lire le synopsis complet.",
+            "Présente le film : année, réalisateur, genre, distribution principale, et l'intrigue sans la fin.",
+        ],
+        RULES,
+    )
 
 
 def main() -> None:
