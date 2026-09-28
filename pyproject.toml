@@ -3,7 +3,7 @@ name = "agora-rag"
 version = "0.6.0"
 description = "Serveurs MCP de RAG sémantique (bge-m3 + LanceDB) pour Claude : débats de l'Assemblée nationale, synopsis de films ; application locale optionnelle"
 authors = [
-    { name = "Rayane", email = "rferrat@luccasoftware.com" }
+    { name = "Rayane Ferrat", email = "rayane3001@icloud.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
