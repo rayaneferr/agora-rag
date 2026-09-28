@@ -52,6 +52,8 @@ découvrir des films grâce à une base de ~35 000 synopsis Wikipédia (en angla
         "Un thriller psychologique avec un narrateur qui perd la mémoire",
         "Un film d'animation japonais sur un esprit de la forêt",
     ),
+    coverage_column="year",
+    coverage_label="films sortis de {min} à {max}",
     tool_labels={"search_films": "Recherche dans les synopsis", "get_film": "Lecture de la fiche du film"},
     to_sources=to_sources,
 )

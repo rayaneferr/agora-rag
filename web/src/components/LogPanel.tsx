@@ -25,8 +25,8 @@ export function LogPanel({ logs, onClose, onClear }: { logs: LogEntry[]; onClose
       </header>
       <div className="logs__list">
         {logs.length === 0 && <p className="muted small">Les appels au modèle et aux outils MCP apparaîtront ici.</p>}
-        {logs.map((l, i) => (
-          <div key={i} className={`log log--${l.level}`}>
+        {logs.map((l) => (
+          <div key={l.id} className={`log log--${l.level}`}>
             <span className="log__time">{time(l.at)}</span>
             <span className="log__text">{l.text}</span>
             {l.detail && <code className="log__detail">{l.detail}</code>}

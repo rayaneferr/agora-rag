@@ -56,6 +56,8 @@ l'Assemblée nationale (17e législature, depuis juillet 2024) et tu rapportes f
         "Quelles positions ont été défendues sur la protection des mineurs en ligne ?",
         "Que s'est-il dit sur la réforme des retraites en 2025 ?",
     ),
+    coverage_column="date",
+    coverage_label="séances du {min} au {max}",
     tool_labels={
         "find_orateurs": "Identification de l'orateur",
         "search_debats": "Recherche dans les comptes rendus",

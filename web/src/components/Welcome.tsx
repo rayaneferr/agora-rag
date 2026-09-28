@@ -19,7 +19,9 @@ export function Welcome({ initial, onReady }: { initial: Settings | null; onRead
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    getProviders().then(setProviders).catch((e) => setError(String(e.message ?? e)));
+    getProviders()
+      .then(setProviders)
+      .catch((e) => setError(String(e.message ?? e)));
   }, []);
 
   useEffect(() => {
@@ -51,7 +53,9 @@ export function Welcome({ initial, onReady }: { initial: Settings | null; onRead
       <main className="welcome">
         <Mascot size={52} />
         <h1>Agora</h1>
-        <p className="welcome__lede">Des agents qui cherchent dans leurs archives avant de répondre. Tout tourne sur ta machine.</p>
+        <p className="welcome__lede">
+          Des agents qui cherchent dans leurs archives avant de répondre. Tout tourne sur ta machine.
+        </p>
 
         {providers.length > 1 && (
           <div className="segmented" role="tablist">

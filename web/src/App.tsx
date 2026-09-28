@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { type ContextInfo, getContexts } from "./api";
+import { type ContextInfo, getContexts, getHealth, type Health } from "./api";
 import { ContextRoom, type Room } from "./components/ContextRoom";
 import { Forum } from "./components/Forum";
 import { type Settings, Welcome } from "./components/Welcome";
@@ -27,10 +27,15 @@ type Screen = { name: "welcome" } | { name: "forum" } | { name: "room"; id: stri
 
 const EMPTY_ROOM: Room = { messages: [], logs: [] };
 
+/** Tout est prêt quand l'index est là ; le modèle d'embeddings se charge sinon dans le serveur MCP. */
+export const isReady = (h: Health | null) =>
+  h !== null && h.index.status === "ready" && (h.embedder.status === "ready" || h.embedder.status === "error");
+
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(loadSettings);
   const [screen, setScreen] = useState<Screen>(settings ? { name: "forum" } : { name: "welcome" });
   const [contexts, setContexts] = useState<ContextInfo[] | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
   // Une conversation par contexte : passer d'un guide à l'autre ne perd rien.
   const [rooms, setRooms] = useState<Record<string, Room>>({});
 
@@ -39,10 +44,42 @@ export default function App() {
     const load = () =>
       getContexts()
         .then(setContexts)
-        .catch(() => (timer = window.setTimeout(load, 2000))); // le backend démarre encore
+        .catch(() => {
+          timer = window.setTimeout(load, 2000); // le backend démarre encore
+        });
     load();
     return () => clearTimeout(timer);
   }, []);
+
+  // Premier lancement : on suit le téléchargement des archives et du modèle jusqu'à ce que tout soit prêt.
+  useEffect(() => {
+    let timer: number;
+    let stopped = false;
+    const poll = () =>
+      getHealth()
+        .then((h) => {
+          if (stopped) return;
+          setHealth(h);
+          if (!isReady(h)) timer = window.setTimeout(poll, 1500);
+        })
+        .catch(() => {
+          if (!stopped) timer = window.setTimeout(poll, 2000);
+        });
+    poll();
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, []);
+
+  // Les archives viennent d'arriver : les compteurs et l'étendue des contextes sont maintenant connus.
+  const ready = isReady(health);
+  useEffect(() => {
+    if (ready)
+      getContexts()
+        .then(setContexts)
+        .catch(() => undefined);
+  }, [ready]);
 
   const current = screen.name === "room" ? contexts?.find((c) => c.id === screen.id) : undefined;
   useEffect(() => {
@@ -69,6 +106,7 @@ export default function App() {
         context={current}
         contexts={contexts}
         settings={settings}
+        health={health}
         room={rooms[current.id] ?? EMPTY_ROOM}
         onRoom={(update) => setRooms((all) => ({ ...all, [current.id]: update(all[current.id] ?? EMPTY_ROOM) }))}
         onModel={(model) => {
@@ -86,6 +124,7 @@ export default function App() {
     <Forum
       contexts={contexts}
       settings={settings}
+      health={health}
       onEnter={(id) => setScreen({ name: "room", id })}
       onChangeModel={() => setScreen({ name: "welcome" })}
     />

@@ -8,7 +8,10 @@ import "@fontsource/inter/600.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "./styles.css";
 
-createRoot(document.getElementById("root")!).render(
+const root = document.getElementById("root");
+if (!root) throw new Error("Élément #root introuvable");
+
+createRoot(root).render(
   <StrictMode>
     <App />
   </StrictMode>,

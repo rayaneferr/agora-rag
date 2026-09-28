@@ -1,11 +1,21 @@
 import { ArrowLeft, PanelLeft, ScrollText, SquarePen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { type ContextInfo, streamChat } from "../api";
-import { type AssistantMessage, type LogEntry, type Message, applyEvent, newAssistant, uid } from "../conversation";
+import { isReady } from "../App";
+import { type ContextInfo, type Health, streamChat } from "../api";
+import {
+  type AssistantMessage,
+  applyEvent,
+  type LogEntry,
+  logEntry,
+  type Message,
+  newAssistant,
+  uid,
+} from "../conversation";
 import { Composer } from "./Composer";
 import { ContextIcon } from "./ContextIcon";
 import { LogPanel } from "./LogPanel";
 import { MessageView } from "./MessageView";
+import { SetupBanner } from "./SetupBanner";
 import type { Settings } from "./Welcome";
 
 export interface Room {
@@ -13,11 +23,15 @@ export interface Room {
   logs: LogEntry[];
 }
 
+/** En dessous de cette distance du bas, on considère que l'utilisateur suit la conversation. */
+const STICK_PX = 80;
+
 /** Un contexte ouvert : les agents à gauche, la conversation au centre, le journal à droite (à la demande). */
 export function ContextRoom(props: {
   context: ContextInfo;
   contexts: ContextInfo[];
   settings: Settings;
+  health: Health | null;
   room: Room;
   onRoom: (update: (r: Room) => Room) => void;
   onModel: (model: string) => void;
@@ -31,26 +45,35 @@ export function ContextRoom(props: {
   const [menuOpen, setMenuOpen] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  // Vrai tant que l'utilisateur est en bas : on suit alors la génération, sinon on le laisse relire.
+  const stick = useRef(true);
+  const ready = isReady(props.health);
 
   useEffect(() => {
     const el = scroller.current;
-    if (el) el.scrollTo({ top: el.scrollHeight });
+    if (el && stick.current) el.scrollTo({ top: el.scrollHeight });
   }, [room.messages]);
 
   useEffect(() => () => abort.current?.abort(), []); // quitter la salle arrête la génération
+
+  const onScroll = () => {
+    const el = scroller.current;
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+  };
 
   const log = (entry: LogEntry) => onRoom((r) => ({ ...r, logs: [...r.logs.slice(-499), entry] }));
 
   async function send(text: string) {
     const content = text.trim();
-    if (!content || busy) return;
+    if (!content || busy || !ready) return;
     setInput("");
+    stick.current = true;
     const history = room.messages
       .filter((m) => m.role === "user" || (m.status === "done" && m.content))
       .map((m) => ({ role: m.role, content: m.content }));
     let current: AssistantMessage = newAssistant();
     onRoom((r) => ({ ...r, messages: [...r.messages, { id: uid(), role: "user", content }, current] }));
-    log({ at: Date.now(), level: "info", text: `Question (${settings.model})`, detail: content });
+    log(logEntry("info", `Question (${settings.model})`, content));
 
     const update = (next: AssistantMessage) => {
       current = next;
@@ -75,17 +98,26 @@ export function ContextRoom(props: {
     } catch (e) {
       if (controller.signal.aborted) {
         update({ ...current, status: "stopped" });
-        log({ at: Date.now(), level: "warn", text: "Génération arrêtée" });
+        log(logEntry("warn", "Génération arrêtée"));
       } else {
         const message = e instanceof Error ? e.message : String(e);
         update({ ...current, status: "error", error: message });
-        log({ at: Date.now(), level: "error", text: "Échec de la requête", detail: message });
+        log(logEntry("error", "Échec de la requête", message));
       }
     } finally {
       abort.current = null;
       setBusy(false);
     }
   }
+
+  /** Rejoue la dernière question : la réponse interrompue ou en erreur est retirée, la question renvoyée. */
+  const retry = () => {
+    const last = room.messages[room.messages.length - 1];
+    const question = room.messages[room.messages.length - 2];
+    if (last?.role !== "assistant" || question?.role !== "user") return;
+    onRoom((r) => ({ ...r, messages: r.messages.slice(0, -2) }));
+    void send(question.content);
+  };
 
   const reset = () => {
     abort.current?.abort();
@@ -100,11 +132,13 @@ export function ContextRoom(props: {
       onSend={() => send(input)}
       onStop={() => abort.current?.abort()}
       busy={busy}
-      placeholder={`Écrire à ${ctx.agent}`}
+      disabled={!ready}
+      placeholder={ready ? `Écrire à ${ctx.agent}` : "Les archives se préparent…"}
       autoFocus
     />
   );
   const empty = room.messages.length === 0;
+  const lastId = room.messages[room.messages.length - 1]?.id;
 
   return (
     <div className={`room ${showLogs ? "has-logs" : ""}`} data-context={ctx.theme}>
@@ -114,7 +148,13 @@ export function ContextRoom(props: {
             <ArrowLeft size={16} />
             Agents
           </button>
-          <button type="button" className="icon-btn" onClick={reset} aria-label="Nouvelle conversation" title="Nouvelle conversation">
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={reset}
+            aria-label="Nouvelle conversation"
+            title="Nouvelle conversation"
+          >
             <SquarePen size={17} />
           </button>
         </div>
@@ -170,10 +210,12 @@ export function ContextRoom(props: {
           <div className="intro">
             <ContextIcon emblem={ctx.emblem} size={44} />
             <h2>{ctx.tagline}</h2>
+            {ctx.coverage && <p className="intro__coverage">{ctx.coverage}</p>}
+            <SetupBanner health={props.health} />
             {composer}
             <div className="suggestions">
               {ctx.suggestions.map((s) => (
-                <button key={s} type="button" className="suggestion" onClick={() => send(s)}>
+                <button key={s} type="button" className="suggestion" disabled={!ready} onClick={() => send(s)}>
                   {s}
                 </button>
               ))}
@@ -181,14 +223,15 @@ export function ContextRoom(props: {
           </div>
         ) : (
           <>
-            <div className="chat__scroll" ref={scroller}>
+            <div className="chat__scroll" ref={scroller} onScroll={onScroll}>
               <div className="thread">
                 {room.messages.map((m) => (
-                  <MessageView key={m.id} msg={m} />
+                  <MessageView key={m.id} msg={m} onRetry={m.id === lastId && !busy ? retry : undefined} />
                 ))}
               </div>
             </div>
             <div className="chat__foot">
+              <SetupBanner health={props.health} />
               {composer}
               <p className="fine">Réponses générées en local à partir des archives. Vérifie les sources.</p>
             </div>
@@ -197,9 +240,15 @@ export function ContextRoom(props: {
       </main>
 
       {showLogs && (
-        <LogPanel logs={room.logs} onClose={() => setShowLogs(false)} onClear={() => onRoom((r) => ({ ...r, logs: [] }))} />
+        <LogPanel
+          logs={room.logs}
+          onClose={() => setShowLogs(false)}
+          onClear={() => onRoom((r) => ({ ...r, logs: [] }))}
+        />
       )}
-      {menuOpen && <div className="backdrop" onClick={() => setMenuOpen(false)} />}
+      {menuOpen && (
+        <button type="button" className="backdrop" aria-label="Fermer le menu" onClick={() => setMenuOpen(false)} />
+      )}
     </div>
   );
 }

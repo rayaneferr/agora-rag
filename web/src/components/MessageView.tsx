@@ -1,9 +1,9 @@
-import { Check, ChevronRight, CircleAlert, Copy } from "lucide-react";
+import { Check, ChevronRight, CircleAlert, Copy, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Source } from "../api";
-import { type AssistantMessage, type Message, type ToolStep, formatMs } from "../conversation";
+import { type AssistantMessage, formatMs, type Message, sourceKey, type ToolStep } from "../conversation";
 
 const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? "s" : ""}`;
 
@@ -14,6 +14,17 @@ function describe(step: ToolStep) {
     .filter(([, v]) => v !== null && v !== undefined && v !== "")
     .map(([k, v]) => `${k.replace("_", " ")} ${v}`);
   return { query: (query ?? nom) as string | undefined, filters };
+}
+
+/** Secondes écoulées depuis le début du tour : un modèle local peut mettre une minute avant le premier token. */
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const s = Math.max(0, Math.floor((now - since) / 1000));
+  return <span className="elapsed">{s} s</span>;
 }
 
 function StepRow({ step }: { step: ToolStep }) {
@@ -31,9 +42,7 @@ function StepRow({ step }: { step: ToolStep }) {
           </span>
         </div>
         {query && <div className="step__query">{query}</div>}
-        {(filters.length > 0 || step.error) && (
-          <div className="step__detail">{step.error ?? filters.join(" · ")}</div>
-        )}
+        {(filters.length > 0 || step.error) && <div className="step__detail">{step.error ?? filters.join(" · ")}</div>}
       </div>
     </li>
   );
@@ -47,7 +56,11 @@ function Activity({ msg }: { msg: AssistantMessage }) {
   useEffect(() => setOpen(live), [live]);
 
   if (!tools.length) {
-    return live ? <div className="activity__live shimmer">Réflexion…</div> : null;
+    return live ? (
+      <div className="activity__live">
+        <span className="shimmer">Réflexion…</span> <Elapsed since={msg.startedAt} />
+      </div>
+    ) : null;
   }
   const running = tools.find((t) => t.status === "running");
   const totalMs = tools.reduce((sum, t) => sum + (t.durationMs ?? 0), 0);
@@ -61,6 +74,7 @@ function Activity({ msg }: { msg: AssistantMessage }) {
     <div className={`activity ${open ? "is-open" : ""}`}>
       <button type="button" className="activity__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span className={live ? "shimmer" : ""}>{summary}</span>
+        {live && <Elapsed since={msg.startedAt} />}
         <ChevronRight className="activity__chevron" size={14} />
       </button>
       <div className="collapse">
@@ -74,35 +88,44 @@ function Activity({ msg }: { msg: AssistantMessage }) {
   );
 }
 
+/** Sources compactes par défaut ; « Extraits » déplie le passage cité, lisible aussi au tactile et au lecteur d'écran. */
 function Sources({ sources }: { sources: Source[] }) {
   const [all, setAll] = useState(false);
+  const [excerpts, setExcerpts] = useState(false);
   if (!sources.length) return null;
-  const shown = all ? sources : sources.slice(0, 3);
+  const shown = all || excerpts ? sources : sources.slice(0, 3);
+  const hasExcerpt = sources.some((s) => s.excerpt);
   return (
-    <div className="sources">
-      {shown.map((s, i) => (
-        <a
-          key={i}
-          className="source"
-          href={s.url ?? undefined}
-          target="_blank"
-          rel="noreferrer"
-          title={s.excerpt || undefined}
-        >
+    <div className={`sources ${excerpts ? "sources--excerpts" : ""}`}>
+      {shown.map((s) => (
+        <a key={sourceKey(s)} className="source" href={s.url ?? undefined} target="_blank" rel="noreferrer">
           <span className="source__title">{s.title}</span>
           <span className="source__sub">{s.subtitle}</span>
+          {excerpts && s.excerpt && <span className="source__excerpt">{s.excerpt}…</span>}
         </a>
       ))}
-      {sources.length > 3 && (
-        <button type="button" className="source source--more" onClick={() => setAll((v) => !v)}>
-          {all ? "Moins" : `+${sources.length - 3}`}
-        </button>
-      )}
+      <span className="sources__actions">
+        {!excerpts && sources.length > 3 && (
+          <button type="button" className="source source--more" onClick={() => setAll((v) => !v)}>
+            {all ? "Moins" : `+${sources.length - 3}`}
+          </button>
+        )}
+        {hasExcerpt && (
+          <button
+            type="button"
+            className="source source--more"
+            onClick={() => setExcerpts((v) => !v)}
+            aria-pressed={excerpts}
+          >
+            {excerpts ? "Masquer les extraits" : "Extraits"}
+          </button>
+        )}
+      </span>
     </div>
   );
 }
 
-function Actions({ msg }: { msg: AssistantMessage }) {
+function Actions({ msg, onRetry }: { msg: AssistantMessage; onRetry?: () => void }) {
   const [copied, setCopied] = useState(false);
   const s = msg.stats;
   const detail = s
@@ -110,19 +133,26 @@ function Actions({ msg }: { msg: AssistantMessage }) {
     : undefined;
   return (
     <div className="actions">
-      <button
-        type="button"
-        className="icon-btn"
-        aria-label="Copier la réponse"
-        onClick={() => {
-          navigator.clipboard?.writeText(msg.content).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1200);
-          });
-        }}
-      >
-        {copied ? <Check size={15} /> : <Copy size={15} />}
-      </button>
+      {msg.content && (
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="Copier la réponse"
+          onClick={() => {
+            navigator.clipboard?.writeText(msg.content).then(() => {
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1200);
+            });
+          }}
+        >
+          {copied ? <Check size={15} /> : <Copy size={15} />}
+        </button>
+      )}
+      {onRetry && (
+        <button type="button" className="icon-btn" aria-label="Réessayer" title="Réessayer" onClick={onRetry}>
+          <RotateCcw size={15} />
+        </button>
+      )}
       {s && (
         <span className="actions__time" title={detail}>
           {formatMs(s.total_ms)}
@@ -132,7 +162,7 @@ function Actions({ msg }: { msg: AssistantMessage }) {
   );
 }
 
-export function MessageView({ msg }: { msg: Message }) {
+export function MessageView({ msg, onRetry }: { msg: Message; onRetry?: () => void }) {
   if (msg.role === "user") {
     return (
       <div className="msg msg--user">
@@ -140,6 +170,7 @@ export function MessageView({ msg }: { msg: Message }) {
       </div>
     );
   }
+  const finished = msg.status === "done" || msg.status === "error" || msg.status === "stopped";
   return (
     <div className="msg msg--assistant">
       <Activity msg={msg} />
@@ -155,12 +186,8 @@ export function MessageView({ msg }: { msg: Message }) {
           {msg.error}
         </div>
       )}
-      {msg.status === "done" && (
-        <>
-          <Sources sources={msg.sources} />
-          <Actions msg={msg} />
-        </>
-      )}
+      {msg.status === "done" && <Sources sources={msg.sources} />}
+      {finished && <Actions msg={msg} onRetry={onRetry} />}
     </div>
   );
 }

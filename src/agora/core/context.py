@@ -43,5 +43,9 @@ class ContextSpec:
     collections: tuple[str, ...]  # tables de la base indexée
     suggestions: tuple[str, ...]
     tool_labels: dict[str, str] = field(default_factory=dict)  # nom d'outil → libellé lisible
+    # Colonne dont les bornes (min, max) décrivent l'étendue des archives, et le gabarit qui les affiche.
+    # Les archives ont une date de fin : l'interface et le prompt système doivent la connaître.
+    coverage_column: str | None = None
+    coverage_label: str = "de {min} à {max}"
     # Transforme le résultat brut d'un outil MCP en sources citables.
     to_sources: Callable[[str, Any], list[Source]] = lambda tool, payload: []

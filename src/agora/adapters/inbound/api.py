@@ -6,14 +6,17 @@ uv run agora --dev      # API seule, pour `npm run dev` dans web/
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import threading
 import webbrowser
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import asdict
+from datetime import date
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -23,39 +26,92 @@ from agora.adapters.outbound import vectorstore as vs
 from agora.adapters.outbound.mcp import McpGateway
 from agora.contexts import CONTEXTS
 from agora.core.agent import LLMError, Turn, run_turn
+from agora.core.context import ContextSpec
 
 log = logging.getLogger("agora")
 WEB_DIST = vs.ROOT / "web" / "dist"
+# L'application n'écoute que sur la boucle locale ; on refuse aussi les requêtes dont l'en-tête Host
+# ne la désigne pas (DNS rebinding : un site tiers ne doit pas pouvoir piloter l'agent).
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+MOIS = [
+    "janvier",
+    "février",
+    "mars",
+    "avril",
+    "mai",
+    "juin",
+    "juillet",
+    "août",
+    "septembre",
+    "octobre",
+    "novembre",
+    "décembre",
+]
+
+
+class Download:
+    """Progression d'un téléchargement de premier lancement, lue par /api/health."""
+
+    def __init__(self):
+        self.status = "unknown"  # ready | downloading | error | unknown
+        self.error: str | None = None
+        self.files: list = []
+        self.progress = None  # callable → (done, total)
+
+    def snapshot(self) -> dict:
+        done = total = None
+        if self.status == "downloading" and self.files and self.progress:
+            with contextlib.suppress(OSError):
+                done, total = self.progress(self.files)
+        return {"status": self.status, "error": self.error, "done_bytes": done, "total_bytes": total}
 
 
 class State:
     gateways: dict[str, McpGateway] = {}
-    index_status: str = "unknown"  # ready | downloading | error | unknown
-    index_error: str | None = None
+    index = Download()
+    embedder = Download()
+    coverage: dict[str, str] = {}
 
 
 state = State()
 
 
-def _prepare_index() -> None:
-    """Télécharge l'index (Hugging Face) si des tables manquent ; en tâche de fond."""
-    from agora.adapters.outbound.index_hub import COLLECTIONS, ensure_index
+def _prepare() -> None:
+    """Premier lancement : index (Hugging Face) puis modèle d'embeddings, en tâche de fond, état visible."""
+    from agora.adapters.outbound import index_hub as hub
 
     try:
-        if all(vs.has_table(c) for c in COLLECTIONS):
-            state.index_status = "ready"
-            return
-        state.index_status = "downloading"
-        ensure_index()
-        state.index_status = "ready"
+        if all(vs.has_table(c) for c in hub.COLLECTIONS):
+            state.index.status = "ready"
+        else:
+            state.index.status = "downloading"
+            progress: dict = {}
+            state.index.files = progress.setdefault("files", [])
+            state.index.progress = lambda files: hub.download_progress(vs.DB_DIR.parent, files)
+            hub.ensure_index(progress)
+            state.index.files = progress["files"]
+            state.index.status = "ready"
     except Exception as exc:
-        state.index_status, state.index_error = "error", str(exc)[:300]
+        state.index.status, state.index.error = "error", str(exc)[:300]
         log.warning("Index indisponible : %s", exc)
+
+    try:
+        if hub.embedder_ready():
+            state.embedder.status = "ready"
+        else:
+            state.embedder.status = "downloading"
+            state.embedder.files = hub.embedder_files()
+            state.embedder.progress = hub.embedder_progress
+            hub.ensure_embedder()
+            state.embedder.status = "ready"
+    except Exception as exc:
+        state.embedder.status, state.embedder.error = "error", str(exc)[:300]
+        log.warning("Modèle d'embeddings indisponible : %s", exc)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    threading.Thread(target=_prepare_index, daemon=True).start()
+    threading.Thread(target=_prepare, daemon=True).start()
     async with AsyncExitStack() as stack:
         # Une passerelle par contexte : chaque agent ne voit que les outils de son domaine.
         for cid, spec in CONTEXTS.items():
@@ -65,6 +121,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Agora", lifespan=lifespan)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
 
 class ChatMessage(BaseModel):
@@ -87,9 +144,34 @@ def _points(collection: str) -> int | None:
         return None  # table en cours de téléchargement
 
 
+def _fr(value) -> str:
+    """Une borne lisible : « 18 juillet 2024 » pour une date ISO, la valeur brute sinon."""
+    if isinstance(value, str) and len(value) == 10 and value[4] == "-":
+        try:
+            d = date.fromisoformat(value)
+            return f"{d.day} {MOIS[d.month - 1]} {d.year}"
+        except ValueError:
+            return value
+    return str(value)
+
+
+def coverage(spec: ContextSpec) -> str | None:
+    """Étendue des archives d'un contexte (« séances du 18 juillet 2024 au 26 septembre 2026 »), mise en cache."""
+    if spec.id in state.coverage or not spec.coverage_column:
+        return state.coverage.get(spec.id)
+    try:
+        b = vs.bounds(spec.collections[0], spec.coverage_column)
+    except Exception:
+        return None
+    if b is None:
+        return None
+    state.coverage[spec.id] = spec.coverage_label.format(min=_fr(b[0]), max=_fr(b[1]))
+    return state.coverage[spec.id]
+
+
 @app.get("/api/health")
 def health():
-    return {"index": {"status": state.index_status, "error": state.index_error}}
+    return {"index": state.index.snapshot(), "embedder": state.embedder.snapshot()}
 
 
 @app.get("/api/contexts")
@@ -98,6 +180,7 @@ def get_contexts():
         {
             "id": cid,
             **asdict(spec.identity),
+            "coverage": coverage(spec),
             "suggestions": list(spec.suggestions),
             "tools": [{"name": n, "label": spec.tool_labels.get(n, n)} for n in state.gateways[cid].tool_names]
             if cid in state.gateways
@@ -130,6 +213,8 @@ async def chat(body: ChatRequest):
     spec = CONTEXTS.get(body.context)
     if spec is None or body.context not in state.gateways:
         raise HTTPException(status_code=404, detail=f"Contexte « {body.context} » inconnu.")
+    if state.index.status != "ready":
+        raise HTTPException(status_code=503, detail="Les archives ne sont pas encore prêtes.")
     try:
         model = llm.make_llm(body.provider, body.model)
     except llm.ProviderError as exc:
@@ -138,7 +223,7 @@ async def chat(body: ChatRequest):
 
     async def events():
         try:
-            async for event in run_turn(spec, model, state.gateways[body.context], turn):
+            async for event in run_turn(spec, model, state.gateways[body.context], turn, coverage(spec)):
                 yield _sse(event)
         except LLMError as exc:
             yield _sse({"type": "error", "kind": exc.kind, "message": str(exc)})

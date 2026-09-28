@@ -23,9 +23,24 @@ export interface ContextInfo {
   theme: string;
   emblem: string;
   corpus_label: string;
+  /** Étendue des archives (« séances du 18 juillet 2024 au 26 septembre 2026 »), null tant que l'index n'est pas là. */
+  coverage: string | null;
   suggestions: string[];
   tools: { name: string; label: string }[];
   points: number;
+}
+
+/** Progression d'un téléchargement de premier lancement (index, modèle d'embeddings). */
+export interface Download {
+  status: "ready" | "downloading" | "error" | "unknown";
+  error: string | null;
+  done_bytes: number | null;
+  total_bytes: number | null;
+}
+
+export interface Health {
+  index: Download;
+  embedder: Download;
 }
 
 export interface Source {
@@ -42,7 +57,6 @@ export interface Stats {
   tool_calls: number;
   prompt_tokens: number;
   completion_tokens: number;
-  cost_usd: number;
   llm_ms: number;
   tool_ms: number;
   total_ms: number;
@@ -75,6 +89,7 @@ async function json<T>(res: Response): Promise<T> {
 
 export const getProviders = () => fetch("/api/providers").then((r) => json<Provider[]>(r));
 export const getContexts = () => fetch("/api/contexts").then((r) => json<ContextInfo[]>(r));
+export const getHealth = () => fetch("/api/health").then((r) => json<Health>(r));
 export const getModels = (provider: string) =>
   fetch(`/api/models?provider=${encodeURIComponent(provider)}`).then((r) =>
     json<{ models: Model[]; default: string | null }>(r),
@@ -86,6 +101,30 @@ export interface ChatRequest {
   model: string;
   message: string;
   history: { role: "user" | "assistant"; content: string }[];
+}
+
+/**
+ * Découpe un flux SSE en trames `data:` au fil des morceaux reçus (une trame peut arriver coupée en deux).
+ * Renvoie les données complètes et garde le reste pour l'appel suivant.
+ */
+export class SseParser {
+  private buffer = "";
+
+  push(chunk: string): string[] {
+    this.buffer += chunk;
+    const out: string[] = [];
+    for (let sep = this.buffer.indexOf("\n\n"); sep >= 0; sep = this.buffer.indexOf("\n\n")) {
+      const frame = this.buffer.slice(0, sep);
+      this.buffer = this.buffer.slice(sep + 2);
+      const data = frame
+        .split("\n")
+        .filter((l) => l.startsWith("data: "))
+        .map((l) => l.slice(6))
+        .join("\n");
+      if (data) out.push(data);
+    }
+    return out;
+  }
 }
 
 /** POST + lecture du flux SSE (EventSource ne sait pas faire de POST). */
@@ -101,21 +140,10 @@ export async function streamChat(req: ChatRequest, onEvent: (e: ChatEvent) => vo
     throw new Error(body.detail ?? `Erreur ${res.status}`);
   }
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-  let buffer = "";
+  const parser = new SseParser();
   for (;;) {
     const { value, done } = await reader.read();
     if (done) break;
-    buffer += value;
-    let sep: number;
-    while ((sep = buffer.indexOf("\n\n")) >= 0) {
-      const frame = buffer.slice(0, sep);
-      buffer = buffer.slice(sep + 2);
-      const data = frame
-        .split("\n")
-        .filter((l) => l.startsWith("data: "))
-        .map((l) => l.slice(6))
-        .join("\n");
-      if (data) onEvent(JSON.parse(data) as ChatEvent);
-    }
+    for (const data of parser.push(value)) onEvent(JSON.parse(data) as ChatEvent);
   }
 }
